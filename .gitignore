@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+build/segments/
+build/video_noaudio.mp4
+build/concat.txt
+build/*.log
+assets/voice_models/
+build/mix.wav
+build/music_only.wav
+build/sfx_only.wav
+build/voice_cache/
