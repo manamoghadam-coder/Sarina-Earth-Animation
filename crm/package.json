@@ -1,0 +1,13 @@
+{
+  "name": "persian-crm",
+  "version": "1.0.0",
+  "description": "سیستم مدیریت ارتباط با مشتری (CRM) فارسی - بدون وابستگی خارجی",
+  "private": true,
+  "type": "commonjs",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "seed": "node --disable-warning=ExperimentalWarning src/seed.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  }
+}
