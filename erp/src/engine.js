@@ -1,6 +1,7 @@
 import { ENTITIES } from './entities.js';
 import { HttpError, bad, isoDate, today } from './util.js';
 import { hashPassword } from './auth.js';
+import { deleteFile } from './files.js';
 
 const q = (s) => `"${s}"`;
 const table = (def) => 'e_' + def.key;
@@ -182,6 +183,8 @@ export async function remove(ctx, def, id) {
   try { (await ctx.db.run(`DELETE FROM ${table(def)} WHERE id=? AND company_id=?`, old.id, ctx.companyId)); }
   catch (e) { throw mapDbError(e, def); }
   await def.afterDelete?.(ctx, old);
+  const atts = await ctx.db.all('SELECT stored FROM attachments WHERE company_id=? AND entity=? AND rec_id=?', ctx.companyId, def.key, old.id);
+  if (atts.length) { await ctx.db.run('DELETE FROM attachments WHERE company_id=? AND entity=? AND rec_id=?', ctx.companyId, def.key, old.id); atts.forEach((a) => deleteFile(a.stored)); }
   await audit(ctx, def.key, old.id, 'delete', labelOf(def, old));
   return { ok: true };
 }

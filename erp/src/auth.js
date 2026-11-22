@@ -45,10 +45,10 @@ export function readToken(tok) {
 export const ROLES = {
   superadmin: { label: 'مدیر کل سامانه' },
   admin: { label: 'مدیر شرکت', perms: { '*': 'vced' } },
-  manager: { label: 'مدیر ارشد', perms: { hr: 'vce', inventory: 'vce', purchasing: 'vce', sales: 'vce', finance: 'vce', accounting: 'v', production: 'vce', projects: 'vce', quality: 'vce' } },
-  hr: { label: 'منابع انسانی', perms: { hr: 'vced', projects: 'v' } },
+  manager: { label: 'مدیر ارشد', perms: { hr: 'vce', inventory: 'vce', purchasing: 'vce', sales: 'vce', finance: 'vce', accounting: 'v', payroll: 'v', production: 'vce', projects: 'vce', quality: 'vce' } },
+  hr: { label: 'منابع انسانی', perms: { hr: 'vced', payroll: 'vced', projects: 'v' } },
   inventory: { label: 'انبارداری', perms: { inventory: 'vced', purchasing: 'v', sales: 'v', production: 'v' } },
-  accountant: { label: 'حسابدار', perms: { accounting: 'vced', finance: 'vced', sales: 'v', purchasing: 'v', inventory: 'v', production: 'v' } },
+  accountant: { label: 'حسابدار', perms: { accounting: 'vced', payroll: 'vced', finance: 'vced', sales: 'v', purchasing: 'v', inventory: 'v', production: 'v' } },
   production: { label: 'تولید', perms: { production: 'vced', inventory: 'vce', quality: 'v', projects: 'v' } },
   purchasing: { label: 'خرید', perms: { purchasing: 'vced', inventory: 'v', finance: 'v' } },
   sales: { label: 'فروش', perms: { sales: 'vced', inventory: 'v', finance: 'v' } },

@@ -185,12 +185,13 @@ async function pageEntity(key) {
   if (!meta) return shell('<div class="empty">یافت نشد</div>');
   const perm = state.me.perms[meta.module] || '';
   const st = { q: '', page: 1, sort: '', dir: '', filters: {} };
+  const hq = new URLSearchParams(location.hash.split('?')[1] || ''); for (const [k, v] of hq) if (k.startsWith('f_')) st.filters[k.slice(2)] = v;
   shell(`<h1>${esc(meta.title)}</h1><div class="toolbar" id="tb"></div><div id="tbl"></div>`, key);
   const filterFields = meta.fields.filter((f) => f.filter && f.type === 'select');
   document.getElementById('tb').innerHTML = `<input type="search" id="q" placeholder="جستجو…">` +
     filterFields.map((f) => `<select data-f="${f.k}"><option value="">${esc(f.label)}: همه</option>${f.options.map((o) => `<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>`).join('') +
     `<span class="sp"></span>` + (key !== 'users' ? `<button class="btn" id="ex">⬇ CSV</button>` : '') +
-    (perm.includes('c') ? `<button class="btn pri" id="nw">＋ ${esc(meta.singular)} جدید</button>` : '');
+    (perm.includes('c') && !meta.noCreate ? `<button class="btn pri" id="nw">＋ ${esc(meta.singular)} جدید</button>` : '');
   let timer;
   document.getElementById('q').oninput = (e) => { clearTimeout(timer); timer = setTimeout(() => { st.q = e.target.value; st.page = 1; load(); }, 250); };
   document.querySelectorAll('[data-f]').forEach((s) => (s.onchange = () => { st.filters[s.dataset.f] = s.value; st.page = 1; load(); }));
@@ -214,6 +215,7 @@ async function pageEntity(key) {
       const acts = (meta.actions || []).filter((a) => a.from.includes(r.status) && perm.includes('e'));
       return `<tr>${cols.map((f) => `<td class="${f.type === 'money' || f.type === 'number' ? 'num' : ''}">${cell(f, r)}</td>`).join('')}<td class="act">
         ${acts.map((a) => `<button class="btn sm ${a.style || ''}" data-act="${a.key}" data-id="${r.id}">${esc(a.label)}</button>`).join(' ')}
+        ${key === 'payslips' ? `<button class="btn sm" data-slip="${r.id}">🖨 فیش</button>` : ''}${key === 'payroll_runs' ? `<a class="btn sm" href="#/e/payslips?f_run_id=${r.id}">فیش‌ها</a>` : ''}
         ${perm.includes('e') && !meta.noEdit ? `<button class="btn sm" data-edit="${r.id}">ویرایش</button>` : `<button class="btn sm" data-edit="${r.id}">مشاهده</button>`}
         ${perm.includes('d') ? `<button class="btn sm bad" data-del="${r.id}">حذف</button>` : ''}</td></tr>`;
     }).join('');
@@ -225,6 +227,7 @@ async function pageEntity(key) {
     t.querySelector('#pp').onclick = () => { st.page--; load(); };
     t.querySelector('#np').onclick = () => { st.page++; load(); };
     t.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = async () => openForm(meta, await api('GET', `/entities/${key}/${b.dataset.edit}`), load)));
+    t.querySelectorAll('[data-slip]').forEach((b) => (b.onclick = () => showPayslip(data.rows.find((r) => r.id === +b.dataset.slip), meta)));
     t.querySelectorAll('[data-del]').forEach((b) => (b.onclick = async () => {
       if (!confirm('این مورد حذف شود؟ این عمل قابل بازگشت نیست.')) return;
       try { await api('DELETE', `/entities/${key}/${b.dataset.del}`); delete state.lookups[key]; toast('حذف شد'); load(); } catch (e) { toast(e.message, true); }
@@ -239,6 +242,23 @@ async function pageEntity(key) {
   await load();
 }
 
+// ─── فیش حقوقی قابل چاپ ───
+function showPayslip(r, meta) {
+  const f = (k) => meta.fields.find((x) => x.k === k);
+  const row = (k, strong) => `<tr><td>${esc(f(k).label)}</td><td class="num">${strong ? '<b>' : ''}${fmt(r[k])}${strong ? '</b>' : ''}</td></tr>`;
+  const bg = document.createElement('div'); bg.className = 'modalbg';
+  bg.innerHTML = `<div class="modal slip"><h2>فیش حقوقی — ${esc(state.me.company.name)}</h2>
+    <p><b>${esc(r._l.employee_id)}</b> &nbsp;·&nbsp; دوره: ${esc(r._l.run_id)} &nbsp;·&nbsp; روزهای ماه: ${fmt(r.days)}${r.unpaid_days ? ` (مرخصی بدون حقوق: ${fmt(r.unpaid_days)} روز)` : ''}</p>
+    <div class="grid2"><table><thead><tr><th colspan="2">پرداخت‌ها</th></tr></thead><tbody>${row('base_pay')}${row('allowances')}${row('overtime_pay')}${row('bonus')}${row('gross', true)}</tbody></table>
+    <table><thead><tr><th colspan="2">کسورات</th></tr></thead><tbody>${row('ins_employee')}${row('tax')}${row('other_deductions')}</tbody></table></div>
+    <h2 style="margin-top:14px">خالص پرداختی: ${fmt(r.net)} ${esc(state.me.company.currency)}</h2>
+    <p class="hint">مبنای بیمه: ${fmt(r.insurable)} — مشمول مالیات: ${fmt(r.taxable_income)} — سهم کارفرما از بیمه (کسر نمی‌شود): ${fmt(r.ins_employer)}</p>
+    <div class="foot no-print"><button class="btn pri" id="pp">🖨 چاپ</button><button class="btn" id="pc">بستن</button></div></div>`;
+  document.body.appendChild(bg);
+  bg.querySelector('#pc').onclick = () => bg.remove();
+  bg.querySelector('#pp').onclick = () => { document.body.classList.add('printing'); print(); document.body.classList.remove('printing'); };
+}
+
 // ─── فرم ایجاد/ویرایش ───
 async function openForm(meta, rec, done) {
   const perm = state.me.perms[meta.module] || '';
@@ -248,7 +268,7 @@ async function openForm(meta, rec, done) {
   const lineField = meta.fields.find((f) => f.type === 'lines');
   const hasLines = !!lineField, cols = lineField?.cols || [];
   for (const c of cols) if (c.type === 'ref' && !refs[c.ref]) refs[c.ref] = await lookup(c.ref);
-  const blank = () => Object.fromEntries(cols.map((c) => [c.k, c.k === 'qty' ? 1 : c.type === 'number' ? 0 : '']));
+  const blank = () => Object.fromEntries(cols.map((c) => [c.k, c.k === 'qty' ? 1 : '']));
   let lines = rec?.lines?.length ? rec.lines.map((l) => ({ ...l })) : [blank()];
   const locked = rec && meta.editWhen && !meta.editWhen.includes(rec.status);
 
@@ -275,9 +295,10 @@ async function openForm(meta, rec, done) {
         `<div class="${f.type === 'textarea' ? 'full' : ''}"><label class="${f.required ? 'req' : ''}" for="f_${f.k}">${esc(f.label)}</label>${input(f)}</div>`).join('')}
       ${hasLines ? `<div class="full lines"><label>${esc(lineField.label)}</label><table><thead><tr>${cols.map((c) => `<th>${esc(c.label)}</th>`).join('')}<th>جمع</th><th></th></tr></thead><tbody id="lb"></tbody></table>
         ${readOnly || locked ? '' : '<button type="button" class="btn sm" id="al" style="margin-top:6px">＋ ردیف</button>'}</div>` : ''}
-      </form><div id="fe"></div>
+      </form>${rec && meta.key !== 'users' ? '<div id="att" class="att"></div>' : ''}<div id="fe"></div>
       <div class="foot">${readOnly || locked ? '' : '<button class="btn pri" id="sv">ذخیره</button>'}<button class="btn" id="cn">بستن</button></div></div>`;
     if (hasLines) renderLines();
+    if (rec && meta.key !== 'users') loadAttachments();
     bg.querySelector('#cn').onclick = () => bg.remove();
     const sv = bg.querySelector('#sv');
     if (sv) sv.onclick = save;
@@ -317,12 +338,44 @@ async function openForm(meta, rec, done) {
       if (f.type === 'date') { if (v.trim() === '') v = ''; else { v = jToIso(v); if (!v) return showErr(`«${f.label}»: تاریخ شمسی را به شکل ۱۴۰۵/۰۱/۲۵ وارد کنید`); } }
       body[f.k] = v;
     }
-    if (hasLines) body.lines = lines.filter((l) => l[cols[0].k]).map((l) => Object.fromEntries(cols.map((c) => [c.k, c.type === 'ref' ? +l[c.k] : c.type === 'number' ? +l[c.k] || 0 : l[c.k] || null])));
+    if (hasLines) body.lines = lines.filter((l) => (cols.some((c) => c.type === 'ref') ? cols.some((c) => c.type === 'ref' && l[c.k]) : cols.some((c) => l[c.k] !== '' && l[c.k] != null))).map((l) => Object.fromEntries(cols.map((c) => [c.k, c.type === 'ref' ? +l[c.k] : c.type === 'number' ? +l[c.k] || 0 : l[c.k] || null])));
     const btn = bg.querySelector('#sv'); btn.disabled = true;
     try {
       await api(rec ? 'PUT' : 'POST', `/entities/${meta.key}${rec ? '/' + rec.id : ''}`, body);
       delete state.lookups[meta.key]; bg.remove(); toast('ذخیره شد'); done();
     } catch (e) { showErr(e.message); btn.disabled = false; }
+  }
+  async function loadAttachments() {
+    const box = bg.querySelector('#att'); if (!box) return;
+    const canUp = perm.includes('c') || perm.includes('e'), canDel = perm.includes('e');
+    let list = [];
+    try { list = await api('GET', `/attachments?entity=${meta.key}&id=${rec.id}`); } catch { return; }
+    const sz = (n) => (n > 1048576 ? fmt(Math.round(n / 104857.6) / 10) + ' MB' : fmt(Math.max(1, Math.round(n / 1024))) + ' KB');
+    box.innerHTML = `<h2 style="margin-top:14px">📎 پیوست‌ها (${fmt(list.length)})</h2>
+      <table><tbody>${list.map((a) => `<tr><td><a href="#" data-dl="${a.id}" data-n="${esc(a.name)}">${esc(a.name)}</a></td><td class="hint">${sz(a.size)}</td><td class="hint">${esc(a.created_by_name || '')}</td><td class="act">${canDel ? `<button type="button" class="btn sm bad" data-rmatt="${a.id}">حذف</button>` : ''}</td></tr>`).join('') || '<tr><td class="hint">پیوستی ثبت نشده</td></tr>'}</tbody></table>
+      ${canUp ? '<input type="file" id="upf" style="margin-top:8px"><div class="hint">pdf، تصویر، Excel/Word/PowerPoint، zip، txt، csv، dwg — حداکثر ۱۰ مگابایت</div>' : ''}`;
+    box.querySelectorAll('[data-dl]').forEach((a) => (a.onclick = async (e) => {
+      e.preventDefault();
+      const res = await fetch(`/api/attachments/${a.dataset.dl}`, { headers: { 'X-ERP': '1', ...(state.company ? { 'X-Company': state.company } : {}) } });
+      if (!res.ok) return toast('دانلود ناموفق بود', true);
+      const l = document.createElement('a'); l.href = URL.createObjectURL(await res.blob()); l.download = a.dataset.n; l.click(); URL.revokeObjectURL(l.href);
+    }));
+    box.querySelectorAll('[data-rmatt]').forEach((b) => (b.onclick = async () => {
+      if (!confirm('این پیوست حذف شود؟')) return;
+      try { await api('DELETE', `/attachments/${b.dataset.rmatt}`); loadAttachments(); } catch (e) { toast(e.message, true); }
+    }));
+    const up = box.querySelector('#upf');
+    if (up) up.onchange = async () => {
+      const f = up.files[0]; if (!f) return;
+      up.disabled = true;
+      try {
+        const res = await fetch(`/api/attachments?entity=${meta.key}&id=${rec.id}&name=${encodeURIComponent(f.name)}`, { method: 'POST', headers: { 'X-ERP': '1', 'Content-Type': 'application/octet-stream', ...(state.company ? { 'X-Company': state.company } : {}) }, body: f });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'آپلود ناموفق بود');
+        toast('پیوست اضافه شد');
+      } catch (e) { toast(e.message, true); }
+      loadAttachments();
+    };
   }
   const showErr = (m) => { bg.querySelector('#fe').innerHTML = `<div class="err">${esc(m)}</div>`; };
   render(); document.body.appendChild(bg);

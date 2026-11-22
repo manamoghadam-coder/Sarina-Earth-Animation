@@ -7,6 +7,7 @@ import { createApp } from '../src/server.js';
 import { seedDemo } from '../src/seed.js';
 
 process.env.ERP_SUPERADMIN_PASSWORD = 'Super-Pass-1';
+process.env.ERP_MAX_UPLOAD_MB = '1';
 if (process.env.TEST_DATABASE_URL) { // اجرای همان تست‌ها روی PostgreSQL: schema تازه
   const pg = (await import('pg')).default; const c = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
   await c.connect(); await c.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await c.end();
@@ -23,6 +24,14 @@ async function client(username, password, company) {
   const cookie = r.headers.get('set-cookie')?.split(';')[0];
   return {
     ok: r.ok, status: r.status,
+    async raw(url, buf) {
+      const res = await fetch(base + '/api' + url, { method: 'POST', headers: { cookie, 'content-type': 'application/octet-stream', 'x-erp': '1', ...(company ? { 'x-company': String(company) } : {}) }, body: buf });
+      return { status: res.status, data: await res.json().catch(() => ({})) };
+    },
+    async download(id) {
+      const res = await fetch(base + '/api/attachments/' + id, { headers: { cookie, 'x-erp': '1', ...(company ? { 'x-company': String(company) } : {}) } });
+      return { status: res.status, buf: Buffer.from(await res.arrayBuffer()), headers: res.headers };
+    },
     async call(method, url, body) {
       const res = await fetch(base + '/api' + url, { method, headers: { cookie, 'content-type': 'application/json', 'x-erp': '1', ...(company ? { 'x-company': String(company) } : {}) }, body: body ? JSON.stringify(body) : undefined });
       const text = await res.text();
@@ -331,6 +340,122 @@ await t('بازگشایی: برگشت سند بستن پس از برداشتن �
   const tb = (await admin.call('GET', '/reports/trial')).data;
   assert.equal(T(tb.rows, '4101').closing, -180_000_000); assert.equal(T(tb.rows, '3201').closing, 0);
   assert.equal((await admin.call('GET', '/reports/income')).data.totalRevenue, 180_000_000);
+});
+
+// ───────────── پیوست فایل ─────────────
+const pdf = Buffer.from('%PDF-1.4\n% تست پیوست\n%%EOF');
+let att, soId;
+await t('آپلود، فهرست و دانلود پیوست (محتوا عین فایل اصلی)', async () => {
+  soId = (await admin.call('GET', '/entities/sales_orders')).data.rows[0].id;
+  const r = await admin.raw(`/attachments?entity=sales_orders&id=${soId}&name=${encodeURIComponent('قرارداد فروش.pdf')}`, pdf);
+  assert.equal(r.status, 201); att = r.data;
+  const list = (await admin.call('GET', `/attachments?entity=sales_orders&id=${soId}`)).data;
+  assert.equal(list.length, 1); assert.equal(list[0].name, 'قرارداد فروش.pdf'); assert.equal(list[0].size, pdf.length);
+  const d = await admin.download(att.id);
+  assert.equal(d.status, 200); assert.deepEqual(d.buf, pdf);
+  assert.match(d.headers.get('content-disposition'), /^attachment; filename\*=UTF-8''/); assert.equal(d.headers.get('x-content-type-options'), 'nosniff');
+});
+await t('پسوند غیرمجاز، فایل خالی و حجم زیاد رد می‌شود', async () => {
+  assert.equal((await admin.raw(`/attachments?entity=sales_orders&id=${soId}&name=virus.exe`, pdf)).status, 400);
+  assert.equal((await admin.raw(`/attachments?entity=sales_orders&id=${soId}&name=a.pdf`, Buffer.alloc(0))).status, 400);
+  assert.equal((await admin.raw(`/attachments?entity=sales_orders&id=${soId}&name=big.pdf`, Buffer.alloc(1.5 * 1048576, 1))).status, 413);
+  assert.equal((await admin.raw(`/attachments?entity=users&id=1&name=a.pdf`, pdf)).status, 404);
+});
+await t('RBAC پیوست: HR به فروش دسترسی ندارد، مشاهده‌گر فقط می‌بیند/دانلود می‌کند', async () => {
+  const hr2 = await client('demo_hr', 'demo1234');
+  assert.equal((await hr2.raw(`/attachments?entity=sales_orders&id=${soId}&name=a.pdf`, pdf)).status, 403);
+  assert.equal((await hr2.call('GET', `/attachments?entity=sales_orders&id=${soId}`)).status, 403);
+  const v = await client('demo_viewer', 'demo1234');
+  assert.equal((await v.call('GET', `/attachments?entity=sales_orders&id=${soId}`)).data.length, 1);
+  assert.equal((await v.download(att.id)).status, 200);
+  assert.equal((await v.raw(`/attachments?entity=sales_orders&id=${soId}&name=a.pdf`, pdf)).status, 403);
+  assert.equal((await v.call('DELETE', `/attachments/${att.id}`)).status, 403);
+});
+await t('ایزولاسیون پیوست بین شرکت‌ها', async () => {
+  assert.equal((await second.download(att.id)).status, 404);
+  assert.equal((await second.call('DELETE', `/attachments/${att.id}`)).status, 404);
+  assert.equal((await second.call('GET', `/attachments?entity=sales_orders&id=${soId}`)).status, 404);
+});
+await t('حذف رکورد، پیوست و فایل روی دیسک را هم پاک می‌کند', async () => {
+  const ex = (await admin.call('POST', '/entities/expenses', { category: 'other', description: 'با پیوست', amount: 10, date: '2020-01-01' })).data;
+  const a = (await admin.raw(`/attachments?entity=expenses&id=${ex.id}&name=fish.png`, Buffer.from([137, 80, 78, 71]))).data;
+  const countFiles = () => { let n = 0; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : n++; }; walk(path.join(dir, 'files')); return n; };
+  const before = countFiles();
+  assert.equal((await admin.call('DELETE', `/entities/expenses/${ex.id}`)).status, 200);
+  assert.equal((await admin.download(a.id)).status, 404); assert.equal(countFiles(), before - 1);
+});
+await t('حذف پیوست توسط مجاز', async () => {
+  assert.equal((await admin.call('DELETE', `/attachments/${att.id}`)).status, 200);
+  assert.equal((await admin.call('GET', `/attachments?entity=sales_orders&id=${soId}`)).data.length, 0);
+});
+
+// ───────────── حقوق و دستمزد (شرکت دوم: دفتر کل خالی) ─────────────
+let run, slipA, slipB;
+await t('پارامترها: پله‌ی اول باید از ۰ شروع شود؛ فقط یک رکورد پارامتر', async () => {
+  assert.equal((await second.call('POST', '/entities/payroll_params', { brackets: [{ from: 100, rate: 10 }] })).status, 400);
+  const ok = await second.call('POST', '/entities/payroll_params', { insurance_employee_pct: 7, insurance_employer_pct: 23, overtime_multiplier: 1.4, daily_hours: 7.33, brackets: [{ from: 0, rate: 0 }, { from: 20_000_000, rate: 10 }, { from: 40_000_000, rate: 20 }] });
+  assert.equal(ok.status, 201);
+  assert.equal((await second.call('POST', '/entities/payroll_params', { insurance_employee_pct: 1 })).status, 409);
+});
+await t('ایجاد دوره‌ی حقوق: بازه‌ی شمسی (مهر ۱۴۰۵ = ۳۰ روز) و ممنوعیت دوره‌ی تکراری', async () => {
+  const A = (await second.call('POST', '/entities/employees', { name: 'الف', salary: 30_000_000, housing_allowance: 3_000_000 })).data;
+  const B = (await second.call('POST', '/entities/employees', { name: 'ب', salary: 15_000_000 })).data;
+  const lv = (await second.call('POST', '/entities/leaves', { employee_id: B.id, kind: 'unpaid', from_date: '2026-09-25', to_date: '2026-09-27' })).data;
+  assert.equal((await second.call('POST', `/entities/leaves/${lv.id}/actions/approve`)).status, 200);
+  run = (await second.call('POST', '/entities/payroll_runs', { year: 1405, month: 7 })).data;
+  assert.equal(run.start_date, '2026-09-23'); assert.equal(run.end_date, '2026-10-22'); assert.equal(run.days, 30);
+  assert.equal((await second.call('POST', '/entities/payroll_runs', { year: 1405, month: 7 })).status, 409);
+  assert.equal((await second.call('POST', '/entities/payroll_runs', { year: 1405, month: 13 })).status, 400);
+  assert.equal((await second.call('POST', '/entities/payslips', { run_id: run.id })).status, 405);
+});
+await t('محاسبه‌ی فیش: مرخصی بدون حقوق، بیمه، مالیات پلکانی', async () => {
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${run.id}/actions/generate`)).status, 200);
+  const slips = (await second.call('GET', `/entities/payslips?f_run_id=${run.id}`)).data.rows;
+  assert.equal(slips.length, 2);
+  slipA = slips.find((x) => x._l.employee_id.endsWith('· الف')); slipB = slips.find((x) => x._l.employee_id.endsWith('· ب'));
+  assert.deepEqual([slipA.gross, slipA.ins_employee, slipA.ins_employer, slipA.tax, slipA.net], [33_000_000, 2_310_000, 7_590_000, 1_069_000, 29_621_000]);
+  assert.deepEqual([slipB.unpaid_days, slipB.base_pay, slipB.ins_employee, slipB.tax, slipB.net], [3, 13_500_000, 945_000, 0, 12_555_000]);
+});
+await t('ویرایش فیش (اضافه‌کاری، پاداش، کسورات) بازمحاسبه و جمع دوره به‌روز می‌شود', async () => {
+  const r = await second.call('PUT', `/entities/payslips/${slipA.id}`, { overtime_hours: 10, bonus: 1_000_000, other_deductions: 500_000 });
+  assert.equal(r.status, 200);
+  assert.deepEqual([r.data.overtime_pay, r.data.gross, r.data.ins_employee, r.data.tax, r.data.net], [1_909_959, 35_909_959, 2_513_697, 1_339_626, 31_556_636]);
+  run = (await second.call('GET', `/entities/payroll_runs/${run.id}`)).data;
+  assert.deepEqual([run.total_gross, run.total_insurance, run.total_tax, run.total_net, run.employer_cost], [49_409_959, 3_458_697, 1_339_626, 44_111_636, 60_774_250]);
+  assert.equal((await second.call('PUT', `/entities/payslips/${slipA.id}`, { other_deductions: 999_999_999 })).status, 400); // خالص منفی
+});
+await t('تأیید دوره: سند حسابداری متوازن؛ پس از آن فیش قابل ویرایش نیست', async () => {
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${run.id}/actions/approve`)).status, 200);
+  const tb = (await second.call('GET', '/reports/trial')).data;
+  const v = (code) => T(tb.rows, code)?.closing;
+  assert.equal(v('5201'), 49_409_959); assert.equal(v('5208'), 11_364_291); assert.equal(v('2301'), -44_111_636);
+  assert.equal(v('2302'), -14_822_988); assert.equal(v('2303'), -1_339_626); assert.equal(v('1601'), -500_000);
+  assert.equal(tb.totals.debit, tb.totals.credit);
+  assert.equal((await second.call('PUT', `/entities/payslips/${slipA.id}`, { bonus: 1 })).status, 409);
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${run.id}/actions/generate`)).status, 409);
+  assert.equal((await second.call('DELETE', `/entities/payslips/${slipA.id}`)).status, 409);
+});
+await t('ثبت پرداخت: بدهی حقوق صفر می‌شود و از بانک خارج می‌شود', async () => {
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${run.id}/actions/pay`)).status, 200);
+  const tb = (await second.call('GET', '/reports/trial')).data;
+  assert.equal(T(tb.rows, '2301').closing, 0); assert.equal(T(tb.rows, '1102').closing, -44_111_636); assert.equal(tb.totals.debit, tb.totals.credit);
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${run.id}/actions/cancel`)).status, 409); // پس از پرداخت لغو نمی‌شود
+});
+await t('لغو دوره‌ی تأییدشده، سند را برگشت می‌دهد و ماه آزاد می‌شود', async () => {
+  const r2 = (await second.call('POST', '/entities/payroll_runs', { year: 1405, month: 8 })).data;
+  await second.call('POST', `/entities/payroll_runs/${r2.id}/actions/generate`);
+  await second.call('POST', `/entities/payroll_runs/${r2.id}/actions/approve`);
+  const before = T((await second.call('GET', '/reports/trial')).data.rows, '5201').closing;
+  assert.ok(before > 49_409_959);
+  assert.equal((await second.call('POST', `/entities/payroll_runs/${r2.id}/actions/cancel`)).status, 200);
+  assert.equal(T((await second.call('GET', '/reports/trial')).data.rows, '5201').closing, 49_409_959);
+  assert.equal((await second.call('POST', '/entities/payroll_runs', { year: 1405, month: 8 })).status, 201); // ماه لغوشده دوباره قابل ثبت
+});
+await t('RBAC حقوق: HR و حسابدار دسترسی دارند، فروش و مشاهده‌گر ندارند', async () => {
+  const hr3 = await client('demo_hr', 'demo1234'), ac = await client('demo_accountant', 'demo1234'), sl = await client('demo_sales', 'demo1234'), vw = await client('demo_viewer', 'demo1234');
+  assert.equal((await hr3.call('GET', '/entities/payroll_runs')).status, 200); assert.equal((await ac.call('GET', '/entities/payslips')).status, 200);
+  assert.equal((await sl.call('GET', '/entities/payslips')).status, 403); assert.equal((await vw.call('GET', '/entities/payslips')).status, 403);
+  assert.equal((await admin.call('GET', '/entities/payslips')).data.total, 0); // ایزولاسیون: شرکت اول فیشی ندارد
 });
 
 console.log(`\n${passed} تست موفق`);

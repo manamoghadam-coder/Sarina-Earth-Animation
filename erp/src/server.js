@@ -8,6 +8,7 @@ import { ENTITIES, MODULES, publicMeta, customerBalance } from './entities.js';
 import { initSecret, signToken, readToken, verifyPassword, hashPassword, can, ROLES } from './auth.js';
 import * as engine from './engine.js';
 import { HttpError, bad, isoDate } from './util.js';
+import { setFilesDir, saveFile, filePath, deleteFile, ALLOWED } from './files.js';
 import * as ACC from './accounting.js';
 import { mrp, capacity, pmRows, pmDue } from './industry.js';
 
@@ -19,6 +20,8 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
   dataDir = dataDir || process.env.ERP_DATA_DIR || path.join(__dir, '..', 'data');
   fs.mkdirSync(dataDir, { recursive: true });
   initSecret(dataDir);
+  setFilesDir(process.env.ERP_FILES_DIR || path.join(dataDir, 'files'));
+  const MAX_UPLOAD = (Number(process.env.ERP_MAX_UPLOAD_MB) || 10) * 1024 * 1024;
   const db = await openDb({ file: path.join(dataDir, 'erp.db'), url: databaseUrl ?? process.env.DATABASE_URL });
   await migrate(db);
   await upgrade(db);
@@ -34,7 +37,8 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       if (url.pathname.startsWith('/api/')) {
         const mutating = req.method !== 'GET' && req.method !== 'HEAD';
         if (mutating && req.headers['x-erp'] !== '1') throw new HttpError(403, 'درخواست نامعتبر');
-        const body = mutating ? await readJson(req) : {};          // بدنه قبل از ورود به صف خوانده می‌شود
+        const isUpload = req.method === 'POST' && url.pathname === '/api/attachments';
+        const body = isUpload ? await readRaw(req, MAX_UPLOAD) : mutating ? await readJson(req) : {};  // بدنه قبل از ورود به صف خوانده می‌شود
         await db.serialize(() => handleApi(req, res, url, body)); // SQLite: اجرای ترتیبی؛ PostgreSQL: موازی
       } else serveStatic(req, res, url);
     } catch (e) {
@@ -132,7 +136,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       requireModule(ctx, def);
       const id = route[2]; const sub = route[3];
       if (!id && method === 'GET') { need(ctx, def, 'v'); return json(res, 200, await engine.list(ctx, def, Object.fromEntries(url.searchParams))); }
-      if (!id && method === 'POST') { need(ctx, def, 'c'); return json(res, 201, await tx(ctx, (c) => engine.create(c, def, body))); }
+      if (!id && method === 'POST') { need(ctx, def, 'c'); if (def.noCreate) throw new HttpError(405, 'این مورد به‌صورت دستی ساخته نمی‌شود'); return json(res, 201, await tx(ctx, (c) => engine.create(c, def, body))); }
       if (id === 'lookup' && method === 'GET') { need(ctx, def, 'v'); return json(res, 200, await engine.lookup(ctx, def)); }
       if (id && !sub && method === 'GET') { need(ctx, def, 'v'); return json(res, 200, await engine.getOne(ctx, def, id)); }
       if (id && !sub && method === 'PUT') { need(ctx, def, 'e'); return json(res, 200, await tx(ctx, (c) => engine.update(c, def, id, body))); }
@@ -155,6 +159,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${def.key}.csv"` });
       return res.end(await engine.toCsv(ctx, def));
     }
+    if (route[0] === 'attachments') return attachments(ctx, route, method, url, body, res);
     if (route[0] === 'dashboard' && method === 'GET') return json(res, 200, await dashboard(ctx));
     if (route[0] === 'reports' && method === 'GET') return json(res, 200, await report(ctx, route[1], false, Object.fromEntries(url.searchParams)));
     if (route[0] === 'audit' && method === 'GET') {
@@ -162,6 +167,58 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       return json(res, 200, (await db.all('SELECT * FROM audit_log WHERE company_id=? ORDER BY id DESC LIMIT 300', ctx.companyId)));
     }
     throw new HttpError(404, 'مسیر یافت نشد');
+  }
+
+  // ─── پیوست فایل ───
+  async function attachments(ctx, route, method, url, body, res) {
+    const user = ctx.user, q = url.searchParams;
+    const target = async (entity, id, acts) => {
+      const def = ENTITIES[entity];
+      if (!def || def.key === 'users') throw new HttpError(404, 'یافت نشد');
+      requireModule(ctx, def);
+      if (!acts.some((a) => can(user.role, def.module, a))) throw new HttpError(403, 'دسترسی لازم را ندارید');
+      const rec = await engine.getRow(ctx, def, id);
+      if (!rec) throw new HttpError(404, 'رکورد یافت نشد');
+      return def;
+    };
+    if (!route[1] && method === 'GET') {
+      await target(q.get('entity'), q.get('id'), ['v']);
+      return json(res, 200, await ctx.db.all('SELECT id,name,mime,size,created_by_name,created_at FROM attachments WHERE company_id=? AND entity=? AND rec_id=? ORDER BY id', ctx.companyId, q.get('entity'), Number(q.get('id'))));
+    }
+    if (!route[1] && method === 'POST') {
+      const def = await target(q.get('entity'), q.get('id'), ['c', 'e']);
+      let name = String(q.get('name') || '').replace(/[\/\\\u0000-\u001f]/g, '_').trim().slice(-150);
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (!name || !ALLOWED[ext] || !name.includes('.')) throw bad(`نوع فایل مجاز نیست (مجاز: ${Object.keys(ALLOWED).join('، ')})`);
+      if (!Buffer.isBuffer(body) || !body.length) throw bad('فایل خالی است');
+      const count = (await ctx.db.get('SELECT COUNT(*) n FROM attachments WHERE company_id=? AND entity=? AND rec_id=?', ctx.companyId, def.key, Number(q.get('id')))).n;
+      if (count >= 25) throw new HttpError(409, 'حداکثر ۲۵ پیوست برای هر رکورد مجاز است');
+      const stored = saveFile(ctx.companyId, body);
+      try {
+        const id = await tx(ctx, async (c) => {
+          const id = await c.db.insert('INSERT INTO attachments (company_id,entity,rec_id,name,mime,size,sha256,stored,created_by,created_by_name) VALUES (?,?,?,?,?,?,?,?,?,?)',
+            ctx.companyId, def.key, Number(q.get('id')), name, ALLOWED[ext], body.length, crypto.createHash('sha256').update(body).digest('hex'), stored, user.id, user.name);
+          await engine.audit(c, def.key, Number(q.get('id')), 'attach', name);
+          return id;
+        });
+        return json(res, 201, { id, name, size: body.length });
+      } catch (e) { deleteFile(stored); throw e; }
+    }
+    const att = route[1] && await ctx.db.get('SELECT * FROM attachments WHERE id=? AND company_id=?', Number(route[1]), ctx.companyId);
+    if (!att) throw new HttpError(404, 'پیوست یافت نشد');
+    if (method === 'GET') {
+      await target(att.entity, att.rec_id, ['v']);
+      const data = fs.readFileSync(filePath(att.stored));
+      res.writeHead(200, { 'Content-Type': att.mime || 'application/octet-stream', 'Content-Length': data.length, 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(att.name)}`, 'Cache-Control': 'private, no-store' });
+      return res.end(data);
+    }
+    if (method === 'DELETE') {
+      await target(att.entity, att.rec_id, ['e']);
+      await tx(ctx, async (c) => { await c.db.run('DELETE FROM attachments WHERE id=? AND company_id=?', att.id, ctx.companyId); await engine.audit(c, att.entity, att.rec_id, 'detach', att.name); });
+      deleteFile(att.stored);
+      return json(res, 200, { ok: true });
+    }
+    throw new HttpError(405, 'روش نامعتبر');
   }
 
   async function authenticate(req) {
@@ -322,6 +379,14 @@ function secHeaders(res) {
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
+}
+function readRaw(req, max) {
+  return new Promise((resolve, reject) => {
+    let size = 0; const chunks = []; let tooBig = false;
+    req.on('data', (c) => { size += c.length; if (size > max) { tooBig = true; if (size > max * 4) req.destroy(); } else chunks.push(c); });
+    req.on('end', () => (tooBig ? reject(new HttpError(413, `حجم فایل بیش از ${Math.round(max / 1048576)} مگابایت است`)) : resolve(Buffer.concat(chunks))));
+    req.on('error', reject);
+  });
 }
 function readJson(req) {
   return new Promise((resolve, reject) => {

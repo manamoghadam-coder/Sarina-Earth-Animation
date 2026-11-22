@@ -5,14 +5,14 @@ import { HttpError, bad, isoDate, today } from './util.js';
 export const CHART = [
   ['1101', 'صندوق', 'asset', 'cash'], ['1102', 'بانک', 'asset', 'bank'], ['1201', 'حساب‌های دریافتنی تجاری', 'asset', 'ar'],
   ['1301', 'موجودی مواد اولیه و کالا', 'asset', 'inv_raw'], ['1302', 'موجودی کالای در جریان ساخت', 'asset', 'inv_wip'], ['1303', 'موجودی کالای ساخته‌شده', 'asset', 'inv_fg'],
-  ['1401', 'مالیات بر ارزش افزوده قابل استرداد', 'asset', 'vat_in'], ['1501', 'دارایی‌های ثابت', 'asset', null],
+  ['1401', 'مالیات بر ارزش افزوده قابل استرداد', 'asset', 'vat_in'], ['1501', 'دارایی‌های ثابت', 'asset', null], ['1601', 'مساعده و وام کارکنان', 'asset', 'employee_advances'],
   ['2101', 'حساب‌های پرداختنی تجاری', 'liability', 'ap'], ['2201', 'مالیات بر ارزش افزوده پرداختنی', 'liability', 'vat_out'],
-  ['2301', 'حقوق و دستمزد پرداختنی', 'liability', null], ['2401', 'وام‌ها و تسهیلات', 'liability', null],
+  ['2301', 'حقوق و دستمزد پرداختنی', 'liability', 'salary_payable'], ['2302', 'بیمه پرداختنی', 'liability', 'ins_payable'], ['2303', 'مالیات حقوق پرداختنی', 'liability', 'tax_payable'], ['2401', 'وام‌ها و تسهیلات', 'liability', null],
   ['3101', 'سرمایه', 'equity', 'equity'], ['3201', 'سود (زیان) انباشته', 'equity', 'retained'],
   ['4101', 'فروش کالا', 'revenue', 'sales'], ['4201', 'سایر درآمدها', 'revenue', null],
   ['5101', 'بهای تمام‌شده کالای فروش‌رفته', 'expense', 'cogs'], ['5201', 'حقوق و دستمزد', 'expense', 'exp_salary'], ['5202', 'اجاره', 'expense', 'exp_rent'],
   ['5203', 'آب، برق، گاز و اینترنت', 'expense', 'exp_utilities'], ['5204', 'حمل و نقل', 'expense', 'exp_transport'], ['5205', 'تبلیغات و بازاریابی', 'expense', 'exp_marketing'],
-  ['5206', 'ملزومات مصرفی', 'expense', 'exp_supplies'], ['5207', 'تعمیر و نگهداری', 'expense', 'exp_maintenance'], ['5299', 'سایر هزینه‌ها', 'expense', 'exp_other'], ['5401', 'دستمزد و سربار تولید جذب‌شده', 'expense', 'conv_absorbed'],
+  ['5206', 'ملزومات مصرفی', 'expense', 'exp_supplies'], ['5207', 'تعمیر و نگهداری', 'expense', 'exp_maintenance'], ['5208', 'سهم کارفرما از بیمه', 'expense', 'exp_insurance_er'], ['5299', 'سایر هزینه‌ها', 'expense', 'exp_other'], ['5401', 'دستمزد و سربار تولید جذب‌شده', 'expense', 'conv_absorbed'],
 ];
 
 export async function seedChart(db, companyId) {

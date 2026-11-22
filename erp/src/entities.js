@@ -2,7 +2,8 @@ import { HttpError, bad, daysBetween } from './util.js';
 import { stockOf, insertMove, applyAvgCost, invKey } from './stock.js';
 import * as ACC from './accounting.js';
 import { completeWorkOrder, completeMaintenance, nextPm, plannedHours } from './industry.js';
-import { addDays, today } from './util.js';
+import { addDays, today, jalaliMonthRange } from './util.js';
+import { recalcSlip, updateRunTotals, generatePayslips, approveRun, payRun, cancelRun } from './payroll.js';
 export { stockOf };
 
 export const MODULES = {
@@ -13,6 +14,7 @@ export const MODULES = {
   finance: { title: 'مالی', icon: '💰' },
   accounting: { title: 'حسابداری', icon: '📒' },
   production: { title: 'تولید', icon: '🏭' },
+  payroll: { title: 'حقوق و دستمزد', icon: '💵' },
   projects: { title: 'پروژه‌ها (PMO)', icon: '📐' },
   quality: { title: 'کیفیت (QA/QMS)', icon: '✅' },
   admin: { title: 'مدیریت سامانه', icon: '⚙️' },
@@ -80,7 +82,12 @@ export const ENTITIES = {
       { k: 'department_id', label: 'واحد', type: 'ref', ref: 'departments', list: true },
       { k: 'position', label: 'سمت', type: 'text', list: true },
       dateField('hire_date', 'تاریخ استخدام'),
-      { k: 'salary', label: 'حقوق پایه', type: 'money', min: 0 },
+      { k: 'salary', label: 'حقوق پایه (ماهانه)', type: 'money', min: 0 },
+      { k: 'housing_allowance', label: 'حق مسکن', type: 'money', min: 0 },
+      { k: 'food_allowance', label: 'حق خواروبار', type: 'money', min: 0 },
+      { k: 'child_allowance', label: 'حق اولاد', type: 'money', min: 0 },
+      { k: 'insured', label: 'مشمول بیمه', type: 'bool', default: 1 },
+      { k: 'taxable', label: 'مشمول مالیات', type: 'bool', default: 1 },
       { k: 'status', label: 'وضعیت', type: 'select', options: S(['active', 'شاغل', 'ok'], ['leave', 'مرخصی بلندمدت', 'warn'], ['terminated', 'ترک کار', 'mute']), default: 'active', list: true, filter: true },
       { k: 'phone', label: 'تلفن', type: 'text' },
       { k: 'email', label: 'ایمیل', type: 'text' },
@@ -558,6 +565,97 @@ export const ENTITIES = {
     ],
   },
 
+  // ───────────── حقوق و دستمزد ─────────────
+  payroll_params: {
+    module: 'payroll', title: 'پارامترهای حقوق و مالیات', singular: 'پارامترهای حقوق', label: ['id'],
+    fields: [
+      { k: 'insurance_employee_pct', label: 'سهم بیمه‌ی کارمند (٪)', type: 'number', min: 0, max: 100, default: 7, list: true },
+      { k: 'insurance_employer_pct', label: 'سهم بیمه‌ی کارفرما (٪)', type: 'number', min: 0, max: 100, default: 23, list: true },
+      { k: 'insurance_ceiling', label: 'سقف ماهانه‌ی مشمول بیمه (۰ = بدون سقف)', type: 'money', min: 0, default: 0, list: true },
+      { k: 'overtime_multiplier', label: 'ضریب اضافه‌کاری', type: 'number', min: 1, default: 1.4, list: true },
+      { k: 'daily_hours', label: 'ساعت کار روزانه', type: 'number', min: 1, max: 24, default: 7.33 },
+      { k: 'brackets', label: 'پله‌های مالیات ماهانه (از مبلغ / نرخ ٪)', type: 'lines', cols: [{ k: 'from', label: 'از مبلغ (ماهانه)', type: 'number' }, { k: 'rate', label: 'نرخ مالیات (٪)', type: 'number' }] },
+    ],
+    async validate(ctx, rec, old) {
+      if (!old && await ctx.db.get('SELECT 1 FROM e_payroll_params WHERE company_id=?', ctx.companyId)) throw new HttpError(409, 'پارامترها قبلاً تعریف شده؛ همان را ویرایش کنید');
+      const b = (Array.isArray(rec.brackets) ? rec.brackets : []).map((x) => ({ from: Number(x.from), rate: Number(x.rate) })).sort((p, q) => p.from - q.from);
+      for (const x of b) if (!(x.from >= 0) || !(x.rate >= 0 && x.rate <= 100)) throw bad('پله‌ی مالیاتی نامعتبر است (مبلغ ≥ ۰ و نرخ بین ۰ تا ۱۰۰)');
+      if (b.length && b[0].from !== 0) throw bad('پله‌ی اول باید از مبلغ ۰ شروع شود (مثلاً نرخ ۰٪ برای بخش معاف)');
+      if (new Set(b.map((x) => x.from)).size !== b.length) throw bad('مبلغ شروع پله‌ها تکراری است');
+      rec.brackets = b;
+    },
+  },
+  payroll_runs: {
+    module: 'payroll', title: 'دوره‌های حقوق', singular: 'دوره‌ی حقوق', label: ['number'], numbering: 'PR', sortDefault: 'id',
+    fields: [
+      { k: 'number', label: 'شماره', type: 'text', readonly: true, list: true },
+      { k: 'year', label: 'سال شمسی', type: 'number', required: true, min: 1380, max: 1500, list: true },
+      { k: 'month', label: 'ماه (۱ تا ۱۲)', type: 'number', required: true, min: 1, max: 12, list: true },
+      { k: 'start_date', label: 'شروع', type: 'date', readonly: true },
+      { k: 'end_date', label: 'پایان', type: 'date', readonly: true },
+      { k: 'days', label: 'روزهای ماه', type: 'number', readonly: true },
+      { k: 'status', label: 'وضعیت', type: 'select', readonly: true, default: 'draft', list: true, filter: true, options: S(['draft', 'پیش‌نویس', 'mute'], ['approved', 'تأیید و ثبت در حسابداری', 'info'], ['paid', 'پرداخت‌شده', 'ok'], ['cancelled', 'لغو شده', 'bad']) },
+      { k: 'employees_count', label: 'تعداد فیش', type: 'number', readonly: true, list: true },
+      { k: 'total_gross', label: 'جمع ناخالص', type: 'money', readonly: true, list: true },
+      { k: 'total_insurance', label: 'جمع بیمه‌ی کارمند', type: 'money', readonly: true },
+      { k: 'total_tax', label: 'جمع مالیات', type: 'money', readonly: true },
+      { k: 'total_net', label: 'جمع خالص پرداختی', type: 'money', readonly: true, list: true },
+      { k: 'employer_cost', label: 'هزینه‌ی کل کارفرما (با سهم بیمه)', type: 'money', readonly: true },
+      { k: 'notes', label: 'توضیحات', type: 'textarea' },
+    ],
+    editWhen: ['draft'],
+    async validate(ctx, rec, old) {
+      if (old && old.status !== 'draft') throw new HttpError(409, 'فقط دوره‌ی پیش‌نویس قابل ویرایش است');
+      if (!Number.isInteger(rec.year) || !Number.isInteger(rec.month)) throw bad('سال و ماه باید عدد صحیح باشند');
+      const r = jalaliMonthRange(rec.year, rec.month);
+      rec.start_date = r.start; rec.end_date = r.end; rec.days = r.days;
+      if (await ctx.db.get(`SELECT 1 FROM e_payroll_runs WHERE company_id=? AND year=? AND month=? AND status!='cancelled' AND id!=?`, ctx.companyId, rec.year, rec.month, old?.id ?? 0))
+        throw new HttpError(409, 'برای این ماه قبلاً دوره‌ی حقوق (غیرلغوشده) ثبت شده است');
+      if (old && (old.year !== rec.year || old.month !== rec.month) && (await ctx.db.get('SELECT 1 FROM e_payslips WHERE run_id=? AND company_id=?', old.id, ctx.companyId)))
+        throw new HttpError(409, 'پس از ایجاد فیش‌ها، ماه دوره قابل تغییر نیست');
+    },
+    async canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط دوره‌ی پیش‌نویس یا لغوشده قابل حذف است'); },
+    async afterDelete(ctx, rec) { await ctx.db.run('DELETE FROM e_payslips WHERE run_id=? AND company_id=?', rec.id, ctx.companyId); },
+    actions: [
+      { key: 'generate', label: 'ایجاد/بازمحاسبه‌ی فیش‌ها', from: ['draft'], to: 'draft', style: 'ok', confirm: 'فیش‌ها برای کارکنان شاغل ساخته می‌شود (ورودی‌های دستی قبلی فیش‌ها پاک می‌شود). ادامه؟', run: (ctx, rec) => generatePayslips(ctx, rec) },
+      { key: 'approve', label: 'تأیید و ثبت سند', from: ['draft'], to: 'approved', style: 'ok', confirm: 'دوره تأیید و سند حسابداری ثبت شود؟ پس از آن فیش‌ها قابل ویرایش نیست.', run: (ctx, rec) => approveRun(ctx, rec) },
+      { key: 'pay', label: 'ثبت پرداخت', from: ['approved'], to: 'paid', style: 'ok', confirm: 'پرداخت خالص حقوق از بانک ثبت شود؟', run: (ctx, rec) => payRun(ctx, rec) },
+      { key: 'cancel', label: 'لغو', from: ['draft', 'approved'], to: 'cancelled', style: 'bad', confirm: 'دوره لغو شود؟ (سند حسابداری برگشت می‌خورد)', run: (ctx, rec) => cancelRun(ctx, rec) },
+    ],
+  },
+  payslips: {
+    module: 'payroll', title: 'فیش‌های حقوقی', singular: 'فیش حقوقی', label: ['id'], noCreate: true, sortDefault: 'id',
+    fields: [
+      { k: 'run_id', label: 'دوره', type: 'ref', ref: 'payroll_runs', readonly: true, list: true },
+      { k: 'employee_id', label: 'کارمند', type: 'ref', ref: 'employees', readonly: true, list: true },
+      { k: 'days', label: 'روزهای ماه', type: 'number', readonly: true },
+      { k: 'unpaid_days', label: 'روز مرخصی بدون حقوق', type: 'number', readonly: true },
+      { k: 'base_pay', label: 'حقوق پایه (متناسب)', type: 'money', readonly: true },
+      { k: 'allowances', label: 'مزایا (مسکن/خواروبار/اولاد)', type: 'money', readonly: true },
+      { k: 'overtime_hours', label: 'ساعت اضافه‌کاری', type: 'number', min: 0, default: 0 },
+      { k: 'overtime_pay', label: 'اضافه‌کاری', type: 'money', readonly: true },
+      { k: 'bonus', label: 'پاداش', type: 'money', min: 0, default: 0 },
+      { k: 'gross', label: 'ناخالص', type: 'money', readonly: true, list: true },
+      { k: 'insurable', label: 'مشمول بیمه', type: 'money', readonly: true },
+      { k: 'ins_employee', label: 'بیمه‌ی کارمند', type: 'money', readonly: true, list: true },
+      { k: 'ins_employer', label: 'بیمه‌ی کارفرما', type: 'money', readonly: true },
+      { k: 'taxable_income', label: 'مشمول مالیات', type: 'money', readonly: true },
+      { k: 'tax', label: 'مالیات', type: 'money', readonly: true, list: true },
+      { k: 'other_deductions', label: 'سایر کسورات (مساعده/وام/جریمه)', type: 'money', min: 0, default: 0 },
+      { k: 'net', label: 'خالص پرداختی', type: 'money', readonly: true, list: true },
+    ],
+    async validate(ctx, rec, old) {
+      if (!old) throw new HttpError(405, 'فیش فقط با «ایجاد فیش‌ها» در دوره‌ی حقوق ساخته می‌شود');
+      await recalcSlip(ctx, rec);
+    },
+    async afterSave(ctx, rec) { await updateRunTotals(ctx, rec.run_id); },
+    async canDelete(rec, ctx) {
+      const run = await ctx.db.get('SELECT status FROM e_payroll_runs WHERE id=? AND company_id=?', rec.run_id, ctx.companyId);
+      if (run?.status !== 'draft') throw new HttpError(409, 'فقط فیش دوره‌ی پیش‌نویس قابل حذف است');
+    },
+    async afterDelete(ctx, rec) { await updateRunTotals(ctx, rec.run_id); },
+  },
+
   // ───────────── مدیریت ─────────────
   users: {
     module: 'admin', title: 'کاربران', singular: 'کاربر', label: ['name'], search: ['username', 'name'],
@@ -592,7 +690,7 @@ for (const [key, d] of Object.entries(ENTITIES)) d.key = key;
 // نسخه‌ی بدون تابع برای ارسال به مرورگر
 export function publicMeta(def) {
   return {
-    key: def.key, module: def.module, title: def.title, singular: def.singular, noEdit: !!def.noEdit, numbered: !!def.numbering,
+    key: def.key, module: def.module, title: def.title, singular: def.singular, noEdit: !!def.noEdit, noCreate: !!def.noCreate, numbered: !!def.numbering,
     editWhen: def.editWhen,
     fields: def.fields.map(({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv }) => ({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv })),
     actions: (def.actions || []).map(({ key, label, from, style, confirm }) => ({ key, label, from, style, confirm })),

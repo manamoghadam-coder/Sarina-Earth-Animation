@@ -90,4 +90,8 @@ td.act { text-align: left; }
   .menu-btn { display: inline-block; }
   .form { grid-template-columns: 1fr; } .content { padding: 14px; }
 }
-@media print { .side, .top, .toolbar, .btn { display: none !important; } .layout { display: block; } }
+@media print {
+  body.printing .layout { display: none !important; }
+  body.printing .modalbg { position: static; background: none; padding: 0; display: block; }
+  body.printing .modal { border: 0; max-width: none; }
+  .no-print { display: none !important; } .side, .top, .toolbar, .btn { display: none !important; } .layout { display: block; } }

@@ -7,6 +7,7 @@ import { ENTITIES } from './entities.js';
 import * as E from './engine.js';
 import { initSecret } from './auth.js';
 import { seedChart } from './accounting.js';
+import { g2j } from './util.js';
 
 export async function seedDemo(db) {
   const exists = (await db.get(`SELECT id FROM companies WHERE name='شرکت نمونه'`));
@@ -27,9 +28,14 @@ export async function seedDemo(db) {
     await E.runAction(ctx, ENTITIES.journal_entries, cap.id, 'post');
     const dep = await mk('departments', { name: 'مهندسی', manager: 'مریم احمدی' });
     const dep2 = await mk('departments', { name: 'بازرگانی', manager: 'رضا کاظمی' });
-    const e1 = await mk('employees', { name: 'مریم احمدی', department_id: dep.id, position: 'مدیر مهندسی', hire_date: '2022-03-01', salary: 180000000, national_id: '0012345678' });
+    const e1 = await mk('employees', { name: 'مریم احمدی', department_id: dep.id, position: 'مدیر مهندسی', hire_date: '2022-03-01', salary: 180000000, housing_allowance: 9000000, food_allowance: 4000000, national_id: '0012345678' });
     const e2 = await mk('employees', { name: 'علی رضایی', department_id: dep.id, position: 'مهندس پروژه', hire_date: '2023-06-15', salary: 120000000 });
     await mk('employees', { name: 'رضا کاظمی', department_id: dep2.id, position: 'مدیر بازرگانی', hire_date: '2021-01-10', salary: 160000000 });
+    const now = new Date(); let [py, pm] = g2j(now.getFullYear(), now.getMonth() + 1, now.getDate()); pm -= 1; if (pm < 1) { pm = 12; py -= 1; }
+    await mk('payroll_params', { insurance_employee_pct: 7, insurance_employer_pct: 23, insurance_ceiling: 0, overtime_multiplier: 1.4, daily_hours: 7.33,
+      brackets: [{ from: 0, rate: 0 }, { from: 100000000, rate: 10 }, { from: 150000000, rate: 15 }, { from: 250000000, rate: 20 }] }); // نمونه‌ی آموزشی؛ مطابق قانون سال جاری تنظیم شود
+    const pr = await mk('payroll_runs', { year: py, month: pm });
+    await E.runAction(ctx, ENTITIES.payroll_runs, pr.id, 'generate');
     await mk('leaves', { employee_id: e2.id, kind: 'annual', from_date: day(5), to_date: day(7), reason: 'مسافرت' });
 
     const w = await mk('warehouses', { name: 'انبار مرکزی', location: 'تهران' });
