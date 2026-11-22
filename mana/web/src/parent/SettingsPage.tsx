@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
+import { AccessPanel } from './AccessPanel';
 import { PushPanel } from '../notify';
 import { ttsStatus, sttSupported } from '../voice';
 import { Field, useAction } from '../ui';
 
 export default function SettingsPage() {
-  const { logout } = useAuth(); const act = useAction(); const [cur, setCur] = useState(''); const [nxt, setNxt] = useState('');
+  const { logout, me } = useAuth(); const act = useAction(); const [cur, setCur] = useState(''); const [nxt, setNxt] = useState('');
   return <div className="space-y-4 max-w-xl"><h1 className="text-xl font-extrabold">تنظیمات</h1>
+    {me!.role === 'parent' && <AccessPanel />}
     <section className="card"><h2 className="font-bold mb-2">🔔 اعلان روی این دستگاه</h2><PushPanel /><p className="text-xs text-slate-500 mt-2">برای دریافت اعلان هنگام بسته بودن برنامه، باید روی هر دستگاه یک‌بار فعال شود.</p></section>
     <section className="card"><h2 className="font-bold mb-2">🎙️ وضعیت قابلیت صوتی این دستگاه</h2>
       <p>خواندن متن فارسی: <b>{({ ok: 'آماده (صدای فارسی موجود)', maybe: 'موتور گفتار هست ولی صدای فارسی گزارش نشده؛ آزمایش کنید', none: 'پشتیبانی نمی‌شود' })[ttsStatus()]}</b></p>

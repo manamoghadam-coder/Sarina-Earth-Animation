@@ -10,7 +10,7 @@ export const appPool = new pg.Pool({ connectionString: config.dbUrl, max: 10 });
 /** System pool: owner role. Only auth.ts, scheduler.ts and scripts may import this. */
 export const sysPool = new pg.Pool({ connectionString: config.dbOwnerUrl, max: 4 });
 
-export type Actor = { id: string; role: 'parent' | 'child' };
+export type Actor = { id: string; role: 'parent' | 'member' | 'child'; perms?: Record<string, number> };
 export type Q = <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 
 /** Runs fn inside a transaction with the DB session bound to the actor, so Row Level Security applies. */

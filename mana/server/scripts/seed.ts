@@ -8,6 +8,7 @@ if (n > 0 && process.argv[2] !== '--force') { console.log('users already exist; 
 const pw = () => crypto.randomBytes(9).toString('base64url');
 const accounts = [
   { username: 'mana', name: 'مانا', role: 'parent', password: process.env.SEED_MANA_PASSWORD ?? pw() },
+  { username: 'vahid', name: 'وحید', role: 'member', password: process.env.SEED_VAHID_PASSWORD ?? pw() },
   { username: 'sarina', name: 'سارینا', role: 'child', password: process.env.SEED_SARINA_PASSWORD ?? pw() },
   { username: 'saman', name: 'سامان', role: 'child', password: process.env.SEED_SAMAN_PASSWORD ?? pw() },
 ];

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { addDays, fa, fmtDate, tehranToday, wd, WEEKDAYS } from '../jalali';
-import { DateField, Empty, Field, Loading, Modal, useAction, useLoad } from '../ui';
+import { DateField, Empty, Field, Loading, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const HZ: Record<string, string> = { short: 'کوتاه‌مدت', long: 'بلندمدت', learning: 'یادگیری' };
 export default function GoalsPage() {
@@ -9,7 +9,7 @@ export default function GoalsPage() {
   const logs = useLoad(() => api<{ habit_id: string; day: string }[]>(`/habits/logs?from=${from}&to=${today}`)); const act = useAction();
   const [g, setG] = useState<any | null>(null); const [h, setH] = useState('');
   const days = Array.from({ length: 7 }, (_, i) => addDays(from, i)); const has = (hid: string, d: string) => logs.data?.some((l) => l.habit_id === hid && l.day === d);
-  return <div className="space-y-4"><div className="flex justify-between items-center"><h1 className="text-xl font-extrabold">اهداف و عادت‌ها</h1><button className="btn btn-teal" onClick={() => setG({ title: '', horizon: 'short', progress: 0, target_date: null })}>＋ هدف</button></div>
+  return <div className="space-y-4"><ReadOnlyBanner module="goals" /><div className="flex justify-between items-center"><h1 className="text-xl font-extrabold">اهداف و عادت‌ها</h1><button className="btn btn-teal" onClick={() => setG({ title: '', horizon: 'short', progress: 0, target_date: null })}>＋ هدف</button></div>
     <Loading error={goals.error} loading={goals.loading} />
     <section className="space-y-2">{goals.data?.length === 0 && <Empty>هدفی ثبت نشده.</Empty>}{goals.data?.map((x) => <button key={x.id} onClick={() => setG({ ...x })} className="card w-full text-start"><div className="flex justify-between"><b>{x.title}</b><span className="chip">{HZ[x.horizon]}{x.status !== 'active' ? ' — ' + (x.status === 'done' ? 'انجام‌شده' : 'رها شده') : ''}</span></div>
       <div className="h-2 bg-slate-100 rounded-full mt-2"><div className="h-2 rounded-full bg-teal-mana" style={{ width: `${x.progress}%` }} /></div><div className="text-xs text-slate-500 mt-1">{fa(x.progress)}٪ {x.target_date && `— تا ${fmtDate(x.target_date, false)}`}</div></button>)}</section>

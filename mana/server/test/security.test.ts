@@ -27,8 +27,8 @@ const call = (u: string, method: any, url: string, payload?: any) => app.inject(
 before(async () => {
   app = await buildApp();
   await sys(`DELETE FROM users WHERE username LIKE 't\\_%'`);
-  await mk('t_mom', 'parent'); await mk('t_sa', 'child'); await mk('t_sm', 'child');
-  for (const u of ['t_mom', 't_sa', 't_sm']) await signIn(u);
+  await mk('t_mom', 'parent'); await mk('t_sa', 'child'); await mk('t_sm', 'child'); await mk('t_dad', 'member');
+  for (const u of ['t_mom', 't_sa', 't_sm', 't_dad']) await signIn(u);
 });
 after(async () => { await sys(`DELETE FROM users WHERE username LIKE 't\\_%'`); await app.close(); await sysPool.end(); await appPool.end(); });
 
@@ -143,4 +143,36 @@ test('scheduler: creates reminders once (deduplicated) at offsets, respects quie
   await sys(`DELETE FROM notifications WHERE ref_id=$1 AND dedupe_key LIKE '%:10'`, [a.id]);
   await generate(tehranInstant(day, '17:12'));
   assert.equal((await sys(`SELECT 1 FROM notifications WHERE ref_id=$1 AND dedupe_key LIKE '%:10'`, [a.id])).length, 0);   // no nudge once reported
+});
+
+test('member (father): no access by default, Mana grants per module, enforced in API and DB', async () => {
+  await sys(`INSERT INTO transactions (kind,amount,occurred_on,note) VALUES ('expense',7,current_date,'dad-test')`);
+  for (const url of ['/api/tasks', '/api/transactions', '/api/finance/summary', '/api/goals', '/api/events', '/api/children', '/api/completions', '/api/members'])
+    assert.equal((await call('t_dad', 'GET', url)).statusCode, 403, url);
+  assert.equal((await call('t_dad', 'POST', '/api/ai/message', { text: 'x' })).statusCode, 403);
+  const dad = { id: ids.t_dad, role: 'member' as const };
+  assert.equal((await withActor(dad, (q) => q(`SELECT * FROM transactions`))).length, 0);          // RLS, not just API
+  await assert.rejects(withActor(dad, (q) => q(`INSERT INTO tasks (title) VALUES ('x')`)));
+  // the member cannot grant himself anything
+  assert.equal((await call('t_dad', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { finance: 2 } })).statusCode, 403);
+  assert.equal((await withActor(dad, (q) => q(`UPDATE users SET permissions='{"finance":2}' WHERE id=$1 RETURNING id`, [ids.t_dad]))).length, 0);
+  // Mana grants read on tasks, write on events
+  const g = await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { tasks: 1, events: 2 } });
+  assert.equal(g.statusCode, 200, g.body);
+  assert.equal((await call('t_dad', 'GET', '/api/tasks')).statusCode, 200);
+  assert.equal((await call('t_dad', 'POST', '/api/tasks', { title: 'nope' })).statusCode, 403);
+  await assert.rejects(withActor(dad, (q) => q(`INSERT INTO tasks (title) VALUES ('x')`)));        // DB blocks read-only writes
+  assert.equal((await call('t_dad', 'POST', '/api/events', { title: 'dad-event', starts_at: '2030-01-01T10:00:00+03:30' })).statusCode, 201);
+  assert.equal((await call('t_dad', 'GET', '/api/transactions')).statusCode, 403);                  // finance still closed
+  assert.equal((await withActor(dad, (q) => q(`SELECT * FROM transactions`))).length, 0);
+  assert.equal(JSON.parse((await call('t_dad', 'GET', '/api/me')).body).permissions.events, 2);
+  // children module is separate; granting it exposes both kids but never the other private modules
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { children: 1 } });
+  assert.equal(JSON.parse((await call('t_dad', 'GET', '/api/children')).body).length >= 2, true);
+  assert.equal((await call('t_dad', 'POST', `/api/children/${ids.t_sa}/stars`, { delta: 5, reason: 'x' })).statusCode, 403);
+  assert.equal((await call('t_dad', 'GET', '/api/finance/summary')).statusCode, 403);
+  // deactivating closes the session
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { active: false });
+  assert.equal((await call('t_dad', 'GET', '/api/me')).statusCode, 401);
+  await sys(`DELETE FROM transactions WHERE note='dad-test'`); await sys(`DELETE FROM events WHERE title='dad-event'`);
 });

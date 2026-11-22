@@ -1,54 +1,54 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireParent } from '../auth.ts';
+import { requireAdult, requirePerm } from '../auth.ts';
 import { withActor } from '../db.ts';
 import { addDays, addJalaliMonth, fmtJalali, jalaliMonthRange, tehranParts, toJalali, todayISO } from '../jalali.ts';
 import { crud, zDate, zId, zText, zTime } from '../util.ts';
 
 export default async function parentRoutes(app: FastifyInstance) {
-  crud(app, 'projects', 'projects', z.object({ title: zText(), description: z.string().max(2000).nullable().optional(), status: z.enum(['active', 'done', 'archived']).optional(), start_date: zDate.nullable().optional(), end_date: zDate.nullable().optional() }));
+  crud(app, 'projects', 'projects', z.object({ title: zText(), description: z.string().max(2000).nullable().optional(), status: z.enum(['active', 'done', 'archived']).optional(), start_date: zDate.nullable().optional(), end_date: zDate.nullable().optional() }), 'created_at DESC', [], 'tasks');
   crud(app, 'tasks', 'tasks', z.object({
     project_id: zId.nullable().optional(), title: zText(), description: z.string().max(4000).nullable().optional(), assignee: z.string().max(60).nullable().optional(),
     start_date: zDate.nullable().optional(), due_date: zDate.nullable().optional(), due_time: zTime.nullable().optional(),
     priority: z.number().int().min(1).max(3).optional(), status: z.enum(['todo', 'doing', 'waiting', 'done', 'cancelled']).optional(),
-  }), 'priority, due_date NULLS LAST', ['status', 'project_id']);
+  }), 'priority, due_date NULLS LAST', ['status', 'project_id'], 'tasks');
   crud(app, 'events', 'events', z.object({
     title: zText(), kind: z.enum(['meeting', 'family', 'birthday', 'occasion', 'other']).optional(), starts_at: z.string().datetime({ offset: true }), ends_at: z.string().datetime({ offset: true }).nullable().optional(),
     note: z.string().max(2000).nullable().optional(), remind_minutes: z.array(z.number().int().min(0).max(10080)).max(5).optional(),
-  }), 'starts_at');
-  crud(app, 'transactions', 'transactions', z.object({ kind: z.enum(['income', 'expense']), amount: z.number().int().positive().max(1e13), category: zText(60).optional(), occurred_on: zDate, note: z.string().max(500).nullable().optional() }), 'occurred_on DESC, created_at DESC');
+  }), 'starts_at', [], 'events');
+  crud(app, 'transactions', 'transactions', z.object({ kind: z.enum(['income', 'expense']), amount: z.number().int().positive().max(1e13), category: zText(60).optional(), occurred_on: zDate, note: z.string().max(500).nullable().optional() }), 'occurred_on DESC, created_at DESC', [], 'finance');
   crud(app, 'debts', 'debts', z.object({
     title: zText(), type: z.enum(['debt', 'installment', 'loan']), total_amount: z.number().int().min(0), paid_amount: z.number().int().min(0).optional(),
     installment_amount: z.number().int().positive().nullable().optional(), next_due_date: zDate.nullable().optional(), remaining_installments: z.number().int().min(0).nullable().optional(), status: z.enum(['open', 'closed']).optional(),
-  }), 'next_due_date NULLS LAST');
-  crud(app, 'goals', 'goals', z.object({ title: zText(), horizon: z.enum(['short', 'long', 'learning']).optional(), progress: z.number().int().min(0).max(100).optional(), target_date: zDate.nullable().optional(), status: z.enum(['active', 'done', 'dropped']).optional() }));
-  crud(app, 'habits', 'habits', z.object({ title: zText(), active: z.boolean().optional() }), 'title');
+  }), 'next_due_date NULLS LAST', [], 'finance');
+  crud(app, 'goals', 'goals', z.object({ title: zText(), horizon: z.enum(['short', 'long', 'learning']).optional(), progress: z.number().int().min(0).max(100).optional(), target_date: zDate.nullable().optional(), status: z.enum(['active', 'done', 'dropped']).optional() }), 'created_at DESC', [], 'goals');
+  crud(app, 'habits', 'habits', z.object({ title: zText(), active: z.boolean().optional() }), 'title', [], 'goals');
 
-  app.put('/api/budgets', { preHandler: requireParent }, async (req) => {
+  app.put('/api/budgets', { preHandler: requirePerm('finance', 2) }, async (req) => {
     const b = z.object({ jy: z.number().int().min(1300).max(1600), jm: z.number().int().min(1).max(12), category: zText(60), amount: z.number().int().min(0) }).strict().parse(req.body);
     return withActor(req.actor!, async (q) => (await q(`INSERT INTO budgets (jy,jm,category,amount) VALUES ($1,$2,$3,$4) ON CONFLICT (jy,jm,category) DO UPDATE SET amount = EXCLUDED.amount RETURNING *`, [b.jy, b.jm, b.category, b.amount]))[0]);
   });
 
-  app.post('/api/tasks/:id/status', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/tasks/:id/status', { preHandler: requirePerm('tasks', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { status } = z.object({ status: z.enum(['todo', 'doing', 'waiting', 'done', 'cancelled']) }).parse(req.body);
     const r = await withActor(req.actor!, (q) => q(`UPDATE tasks SET status=$2, done_at = CASE WHEN $2='done' THEN now() ELSE NULL END WHERE id=$1 RETURNING *`, [id, status]));
     return r[0] ?? reply.code(404).send({ error: 'not_found' });
   });
 
-  app.put('/api/habits/:id/log', { preHandler: requireParent }, async (req) => {
+  app.put('/api/habits/:id/log', { preHandler: requirePerm('goals', 2) }, async (req) => {
     const id = zId.parse((req.params as any).id);
     const { day, done } = z.object({ day: zDate, done: z.boolean() }).parse(req.body);
     await withActor(req.actor!, (q) => done ? q(`INSERT INTO habit_logs VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, day]) : q(`DELETE FROM habit_logs WHERE habit_id=$1 AND day=$2`, [id, day]));
     return { ok: true };
   });
-  app.get('/api/habits/logs', { preHandler: requireParent }, async (req) => {
+  app.get('/api/habits/logs', { preHandler: requirePerm('goals', 1) }, async (req) => {
     const { from, to } = z.object({ from: zDate, to: zDate }).parse(req.query);
     return withActor(req.actor!, (q) => q(`SELECT habit_id, day FROM habit_logs WHERE day BETWEEN $1 AND $2`, [from, to]));
   });
 
   // pay one installment / a custom amount; records an expense and moves the due date by one Jalali month
-  app.post('/api/debts/:id/pay', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/debts/:id/pay', { preHandler: requirePerm('finance', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { amount } = z.object({ amount: z.number().int().positive().optional() }).parse(req.body ?? {});
     return withActor(req.actor!, async (q) => {
@@ -66,7 +66,7 @@ export default async function parentRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get('/api/finance/summary', { preHandler: requireParent }, async (req) => {
+  app.get('/api/finance/summary', { preHandler: requirePerm('finance', 1) }, async (req) => {
     const t = toJalali(todayISO());
     const { jy, jm } = z.object({ jy: z.coerce.number().int().default(t.jy), jm: z.coerce.number().int().min(1).max(12).default(t.jm) }).parse(req.query);
     const { from, to } = jalaliMonthRange(jy, jm);
@@ -83,7 +83,7 @@ export default async function parentRoutes(app: FastifyInstance) {
     });
   });
 
-  app.get('/api/dashboard', { preHandler: requireParent }, async (req) => {
+  app.get('/api/dashboard', { preHandler: requireAdult }, async (req) => {
     const today = todayISO(); const now = tehranParts();
     const t = toJalali(today); const { from, to } = jalaliMonthRange(t.jy, t.jm);
     return withActor(req.actor!, async (q) => {

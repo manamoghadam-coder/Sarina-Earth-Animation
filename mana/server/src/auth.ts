@@ -46,9 +46,9 @@ declare module 'fastify' { interface FastifyRequest { actor?: Actor } }
 export async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[COOKIE];
   if (!token) return reply.code(401).send({ error: 'unauthenticated' });
-  const [s] = await sys(`SELECT u.id, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha(token)]);
+  const [s] = await sys(`SELECT u.id, u.role, u.permissions FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha(token)]);
   if (!s) return reply.code(401).send({ error: 'unauthenticated' });
-  req.actor = { id: s.id, role: s.role };
+  req.actor = { id: s.id, role: s.role, perms: s.role === 'member' ? s.permissions : undefined };
   // CSRF defence in depth (cookie is SameSite=Strict): state-changing requests must be same-origin XHR/fetch
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-requested-with'] !== 'mana') return reply.code(403).send({ error: 'csrf' });
 }
@@ -56,4 +56,19 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
   await requireUser(req, reply);
   if (reply.sent) return;
   if (req.actor!.role !== 'parent') return reply.code(403).send({ error: 'forbidden' });
+}
+
+export const MODULES = ['tasks', 'events', 'finance', 'goals', 'children', 'photos'] as const;
+export const level = (a: Actor, m: string) => (a.role === 'parent' ? 2 : a.role === 'member' ? Math.min(2, Math.max(0, Number(a.perms?.[m] ?? 0))) : 0);
+/** API-level gate (the database enforces the same rule through RLS). need: 1=read, 2=write. */
+export const requirePerm = (m: (typeof MODULES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {
+  await requireUser(req, reply);
+  if (reply.sent) return;
+  if (level(req.actor!, m) < need) return reply.code(403).send({ error: 'forbidden' });
+};
+/** Mana or the father (any adult account); never children. */
+export async function requireAdult(req: FastifyRequest, reply: FastifyReply) {
+  await requireUser(req, reply);
+  if (reply.sent) return;
+  if (req.actor!.role === 'child') return reply.code(403).send({ error: 'forbidden' });
 }

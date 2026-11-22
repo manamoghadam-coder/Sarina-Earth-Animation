@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { MONTHS, WEEKDAYS, addDays, fa, fmtDate, fmtInstant, isoFromJ, jmLen, parts, tehranIso, tehranToday, wd } from '../jalali';
-import { DateField, Field, Modal, useAction, useLoad } from '../ui';
+import { DateField, Field, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const KIND: Record<string, string> = { meeting: 'جلسه', family: 'خانوادگی', birthday: 'تولد', occasion: 'مناسبت', other: 'سایر' };
 export default function CalendarPage() {
@@ -20,7 +20,7 @@ export default function CalendarPage() {
   const weekStart = addDays(sel, -wd(sel));
   const dayCell = (iso: string, label: string | number, dim = false) => <button key={iso} onClick={() => setSel(iso)} className={`min-h-16 rounded-xl border p-1 text-start ${iso === sel ? 'border-teal-mana bg-teal-soft' : 'border-slate-200 bg-white'} ${iso === today ? 'ring-2 ring-navy-800' : ''} ${dim ? 'opacity-50' : ''}`}>
     <div className="text-sm font-bold">{fa(label)}</div>{(byDay[iso] ?? []).slice(0, 2).map((x, i) => <div key={i} className="text-[10px] truncate">{x.label}</div>)}{(byDay[iso]?.length ?? 0) > 2 && <div className="text-[10px] text-slate-500">+{fa(byDay[iso].length - 2)}</div>}</button>;
-  return <div>
+  return <div><ReadOnlyBanner module="events" />
     <div className="flex items-center justify-between mb-3 flex-wrap gap-2"><h1 className="text-xl font-extrabold">تقویم</h1><div className="flex gap-2"><button className={`btn ${view === 'month' ? '' : 'btn-ghost'}`} onClick={() => setView('month')}>ماهانه</button><button className={`btn ${view === 'week' ? '' : 'btn-ghost'}`} onClick={() => setView('week')}>هفتگی</button>
       <button className="btn btn-teal" onClick={() => setEdit({ title: '', kind: 'meeting', date: sel, time: '10:00', remind: 30 })}>＋ رویداد</button></div></div>
     {view === 'month' ? <>

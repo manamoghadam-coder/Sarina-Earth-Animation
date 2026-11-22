@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, photoUrl } from '../api';
 import { WEEKDAYS, fa, fmtDate, instantFa, fmtTime } from '../jalali';
-import { Avatar, DateField, Empty, Field, Loading, Modal, useAction, useLoad, useToast } from '../ui';
+import { Avatar, DateField, Empty, Field, Loading, Modal, useAction, useLoad, useToast , ReadOnlyBanner } from '../ui';
 
 const KINDS: Record<string, string> = { homework: 'تکالیف', study: 'مطالعه درسی', class: 'کلاس', music: 'موسیقی', language: 'زبان', reading: 'کتاب', chore: 'کار خانه', story: 'قصه', writing: 'نوشتن', game: 'بازی', other: 'سایر' };
 const ICONS = ['✏️', '📖', '🎵', '💃', '🎤', '📜', '🔤', '🖍️', '📚', '🐻', '🧸', '⭐', '🎨', '🏃'];
@@ -12,7 +12,7 @@ export default function Family() {
   if (!kids.data) return <Loading error={kids.error} loading={kids.loading} />;
   const kid = kids.data.find((k) => k.id === sel) ?? kids.data[0];
   if (!kid) return <Empty>حساب کودکی تعریف نشده.</Empty>;
-  return <div className="space-y-3"><h1 className="text-xl font-extrabold">خانواده</h1>
+  return <div className="space-y-3"><ReadOnlyBanner module="children" /><h1 className="text-xl font-extrabold">خانواده</h1>
     <div className="flex gap-2">{kids.data.map((k) => <button key={k.id} onClick={() => setSel(k.id)} className={`card flex items-center gap-2 flex-1 ${k.id === kid.id ? '!border-teal-mana !bg-teal-soft' : ''}`}><Avatar id={k.avatar_photo_id} name={k.display_name} /><div className="text-start"><b>{k.display_name}</b><div className="text-xs">⭐ {fa(k.balance)} ستاره</div></div></button>)}</div>
     <div className="flex gap-2 overflow-x-auto pb-1">{TABS.map(([k, t]) => <button key={k} className={`btn whitespace-nowrap ${tab === k ? '' : 'btn-ghost'}`} onClick={() => setTab(k)}>{t}</button>)}</div>
     {tab === 'plan' && <Plan kid={kid} />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}

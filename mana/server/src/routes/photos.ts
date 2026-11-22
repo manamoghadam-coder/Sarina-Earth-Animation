@@ -5,7 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { config } from '../config.ts';
-import { requireParent, requireUser } from '../auth.ts';
+import { requirePerm, requireUser } from '../auth.ts';
 import { withActor } from '../db.ts';
 import { zId } from '../util.ts';
 
@@ -19,7 +19,7 @@ function sniff(b: Buffer): { mime: string; ext: string } | null {
 const dir = () => { const d = path.resolve(config.storageDir, 'photos'); fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; };
 
 export default async function photoRoutes(app: FastifyInstance) {
-  app.post('/api/users/:id/photos', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/users/:id/photos', { preHandler: requirePerm('photos', 2) }, async (req, reply) => {
     const owner = zId.parse((req.params as any).id);
     const file = await req.file({ limits: { fileSize: MAX, files: 1 } });
     if (!file) return reply.code(400).send({ error: 'no_file' });
@@ -46,14 +46,14 @@ export default async function photoRoutes(app: FastifyInstance) {
     reply.header('Content-Type', p.mime).header('Cache-Control', 'private, max-age=300').header('Content-Disposition', 'inline');
     return reply.send(fs.createReadStream(path.join(dir(), path.basename(p.file_name))));
   });
-  app.delete('/api/photos/:id', { preHandler: requireParent }, async (req, reply) => {
+  app.delete('/api/photos/:id', { preHandler: requirePerm('photos', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const [p] = await withActor(req.actor!, (q) => q(`DELETE FROM photos WHERE id=$1 RETURNING file_name`, [id]));
     if (!p) return reply.code(404).send({ error: 'not_found' });
     fs.rmSync(path.join(dir(), path.basename(p.file_name)), { force: true });
     return { ok: true };
   });
-  app.post('/api/photos/:id/avatar', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/photos/:id/avatar', { preHandler: requirePerm('photos', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const r = await withActor(req.actor!, (q) => q(`UPDATE users SET avatar_photo_id=$1 WHERE id=(SELECT owner_id FROM photos WHERE id=$1) RETURNING id`, [id]));
     return r[0] ? { ok: true } : reply.code(404).send({ error: 'not_found' });

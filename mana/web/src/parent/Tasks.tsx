@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { fmtDate, fmtTime } from '../jalali';
-import { DateField, Empty, Field, Loading, Modal, useAction, useLoad } from '../ui';
+import { DateField, Empty, Field, Loading, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const ST: Record<string, string> = { todo: 'انجام‌نشده', doing: 'در حال انجام', waiting: 'منتظر اقدام دیگران', done: 'انجام‌شده', cancelled: 'لغوشده' };
 const PR = ['', 'بالا', 'متوسط', 'پایین'];
@@ -10,7 +10,7 @@ export default function Tasks() {
   const [filter, setFilter] = useState('open'); const [edit, setEdit] = useState<any | null>(null); const [proj, setProj] = useState(false); const act = useAction();
   const list = (tasks.data ?? []).filter((t) => (filter === 'open' ? ['todo', 'doing', 'waiting'].includes(t.status) : filter === 'all' ? true : t.status === filter));
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date());
-  return <div>
+  return <div><ReadOnlyBanner module="tasks" />
     <div className="flex items-center justify-between mb-3"><h1 className="text-xl font-extrabold">کارها و پروژه‌ها</h1><div className="flex gap-2"><button className="btn btn-ghost" onClick={() => setProj(true)}>پروژه‌ها ({projects.data?.length ?? 0})</button><button className="btn btn-teal" onClick={() => setEdit({ title: '', priority: 2, status: 'todo' })}>＋ کار جدید</button></div></div>
     <div className="flex gap-2 mb-3 overflow-x-auto">{[['open', 'باز'], ['done', 'انجام‌شده'], ['cancelled', 'لغوشده'], ['all', 'همه']].map(([k, t]) => <button key={k} className={`btn ${filter === k ? '' : 'btn-ghost'}`} onClick={() => setFilter(k)}>{t}</button>)}</div>
     <Loading error={tasks.error} loading={tasks.loading} />{!tasks.loading && list.length === 0 && <Empty>موردی نیست.</Empty>}

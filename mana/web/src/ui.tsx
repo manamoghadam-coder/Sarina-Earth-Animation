@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { errText, photoUrl } from './api';
+import { useLevel } from './auth';
 import { MONTHS, fa, isoFromJ, jmLen, parts, tehranToday, toEnDigits } from './jalali';
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
@@ -64,4 +65,12 @@ export function BarChart({ rows, fmt }: { rows: { label: string; value: number; 
 }
 export function Confirm({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {
   return <Modal title="تأیید" onClose={onNo}><p className="mb-4">{text}</p><div className="flex gap-2"><button className="btn btn-teal flex-1" onClick={onYes}>بله</button><button className="btn btn-ghost flex-1" onClick={onNo}>خیر</button></div></Modal>;
+}
+
+/** Shows a banner for read-only access; the API/DB reject writes regardless. */
+export function ReadOnlyBanner({ module }: { module: string }) {
+  return useLevel(module) === 1 ? <p role="note" className="rounded-xl bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 mb-3 text-sm">👁 دسترسی شما به این بخش فقط «مشاهده» است.</p> : null;
+}
+export function Need({ module, children }: { module: string; children: ReactNode }) {
+  return useLevel(module) >= 1 ? <>{children}</> : <div className="card text-center my-8"><div className="text-4xl">🔒</div><p className="mt-2">به این بخش دسترسی ندارید. مانا می‌تواند از «تنظیمات ← حساب‌ها و دسترسی‌ها» آن را فعال کند.</p></div>;
 }

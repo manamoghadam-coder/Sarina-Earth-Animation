@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { MONTHS, fa, fmtDate, money, parts, tehranToday } from '../jalali';
-import { BarChart, DateField, Empty, Field, Loading, Modal, MoneyField, useAction, useLoad } from '../ui';
+import { BarChart, DateField, Empty, Field, Loading, Modal, MoneyField, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const CATS = ['خانه', 'حمل‌ونقل', 'سلامت', 'آموزش', 'تفریح', 'قبوض', 'پوشاک', 'اقساط و بدهی', 'حقوق', 'سایر'];
 const TYPE: Record<string, string> = { debt: 'بدهی', installment: 'قسط', loan: 'وام' };
@@ -15,7 +15,7 @@ export default function Finance() {
   const step = (n: number) => { let m = ym.jm + n, y = ym.jy; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } setYm({ jy: y, jm: m }); };
   const d = sum.data;
   const monthTx = (txs.data ?? []).filter((x) => from && x.occurred_on >= from && x.occurred_on <= to);
-  return <div className="space-y-4">
+  return <div className="space-y-4"><ReadOnlyBanner module="finance" />
     <div className="flex items-center justify-between flex-wrap gap-2"><h1 className="text-xl font-extrabold">مدیریت مالی <span className="chip">خصوصی</span></h1>
       <div className="flex gap-2"><button className="btn btn-teal" onClick={() => setTx({ kind: 'expense', amount: '', category: 'خانه', occurred_on: tehranToday(), note: '' })}>＋ تراکنش</button><button className="btn btn-ghost" onClick={() => setDebt({ title: '', type: 'installment', total_amount: '', installment_amount: '', next_due_date: tehranToday(), remaining_installments: '' })}>＋ قسط/بدهی/وام</button></div></div>
     <div className="flex items-center justify-between"><button className="btn btn-ghost" onClick={() => step(-1)} aria-label="ماه قبل">›</button><b>{MONTHS[ym.jm - 1]} {fa(ym.jy)}</b><button className="btn btn-ghost" onClick={() => step(1)} aria-label="ماه بعد">‹</button></div>

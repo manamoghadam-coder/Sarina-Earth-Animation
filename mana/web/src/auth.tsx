@@ -1,9 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, ApiError } from './api';
 
-export type Me = { id: string; username: string; display_name: string; role: 'parent' | 'child'; avatar_photo_id: string | null; settings: null | { voice_notifications: boolean; read_aloud_default: boolean; mic_allowed: boolean; weekly_goal_stars: number; notifications_enabled: boolean } };
+export type Me = { id: string; username: string; display_name: string; role: 'parent' | 'member' | 'child'; avatar_photo_id: string | null; permissions: Record<string, number>; settings: null | { voice_notifications: boolean; read_aloud_default: boolean; mic_allowed: boolean; weekly_goal_stars: number; notifications_enabled: boolean } };
 const Ctx = createContext<{ me: Me | null; loading: boolean; login: (u: string, p: string) => Promise<void>; logout: () => Promise<void>; refresh: () => Promise<void> }>(null as any);
 export const useAuth = () => useContext(Ctx);
+/** Permission level for a module: 0 none, 1 read, 2 write (Mana always 2). */
+export const useLevel = (m: string) => useAuth().me?.permissions?.[m] ?? 0;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null); const [loading, setLoading] = useState(true);

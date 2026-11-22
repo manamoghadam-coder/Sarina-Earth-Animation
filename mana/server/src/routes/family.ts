@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireParent, requireUser, hashPassword, revokeAll } from '../auth.ts';
+import { requireParent, requirePerm, requireUser, hashPassword, revokeAll } from '../auth.ts';
 import { withActor } from '../db.ts';
 import { addDays, fmtJalali, persianWeekday, todayISO } from '../jalali.ts';
 import { balanceOf, decideCompletion, awardBadges } from '../rewards.ts';
@@ -16,12 +16,12 @@ export const activitySchema = z.object({
 
 export default async function familyRoutes(app: FastifyInstance) {
   // ----- parent: children overview -----
-  app.get('/api/children', { preHandler: requireParent }, async (req) => withActor(req.actor!, async (q) => {
+  app.get('/api/children', { preHandler: requirePerm('children', 1) }, async (req) => withActor(req.actor!, async (q) => {
     const kids = await q(`SELECT u.id, u.username, u.display_name, u.avatar_photo_id, u.active, s.* FROM users u JOIN child_settings s ON s.child_id=u.id WHERE u.role='child' ORDER BY u.display_name`);
     for (const k of kids) k.balance = await balanceOf(q, k.id);
     return kids;
   }));
-  app.patch('/api/children/:id/settings', { preHandler: requireParent }, async (req) => {
+  app.patch('/api/children/:id/settings', { preHandler: requirePerm('children', 2) }, async (req) => {
     const id = zId.parse((req.params as any).id);
     const d = z.object({ notifications_enabled: z.boolean(), voice_notifications: z.boolean(), read_aloud_default: z.boolean(), quiet_start: zTime, quiet_end: zTime,
       reminder_offsets: z.array(z.number().int().min(-240).max(240)).max(5), mic_allowed: z.boolean(), weekly_goal_stars: z.number().int().min(0).max(1000) }).partial().strict().parse(req.body);
@@ -38,23 +38,23 @@ export default async function familyRoutes(app: FastifyInstance) {
   });
 
   // ----- parent: activities, rewards, goals (CRUD) -----
-  crud(app, 'activities', 'activities', activitySchema, 'start_time NULLS LAST', ['child_id']);
-  crud(app, 'rewards', 'rewards', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), cost_stars: z.number().int().min(1).max(100000), active: z.boolean().optional() }), 'cost_stars', ['child_id']);
-  crud(app, 'child-goals', 'child_goals', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), target_stars: z.number().int().min(1).nullable().optional(), done: z.boolean().optional() }), 'title', ['child_id']);
+  crud(app, 'activities', 'activities', activitySchema, 'start_time NULLS LAST', ['child_id'], 'children');
+  crud(app, 'rewards', 'rewards', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), cost_stars: z.number().int().min(1).max(100000), active: z.boolean().optional() }), 'cost_stars', ['child_id'], 'children');
+  crud(app, 'child-goals', 'child_goals', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), target_stars: z.number().int().min(1).nullable().optional(), done: z.boolean().optional() }), 'title', ['child_id'], 'children');
 
   // ----- parent: approvals -----
-  app.get('/api/completions', { preHandler: requireParent }, async (req) => {
+  app.get('/api/completions', { preHandler: requirePerm('children', 1) }, async (req) => {
     const { status = 'pending' } = z.object({ status: z.enum(['pending', 'approved', 'rejected']).optional() }).parse(req.query);
     return withActor(req.actor!, (q) => q(`SELECT c.id, c.day, c.status, c.stars_awarded, c.created_at, u.display_name AS child, a.title, a.icon, a.stars FROM completions c JOIN users u ON u.id=c.child_id JOIN activities a ON a.id=c.activity_id WHERE c.status=$1 ORDER BY c.created_at DESC LIMIT 100`, [status]));
   });
-  app.post('/api/completions/:id/decide', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/completions/:id/decide', { preHandler: requirePerm('children', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { approve, stars } = z.object({ approve: z.boolean(), stars: z.number().int().min(0).max(100).optional() }).parse(req.body);
     const r = await withActor(req.actor!, (q) => decideCompletion(q, id, approve, stars));
     return r ?? reply.code(409).send({ error: 'not_pending' });
   });
   // mother marks an activity done directly (approved at once)
-  app.post('/api/children/:id/mark-done', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/children/:id/mark-done', { preHandler: requirePerm('children', 2) }, async (req, reply) => {
     const cid = zId.parse((req.params as any).id);
     const { activity_id, day = todayISO() } = z.object({ activity_id: zId, day: zDate.optional() }).parse(req.body);
     return withActor(req.actor!, async (q) => {
@@ -65,14 +65,14 @@ export default async function familyRoutes(app: FastifyInstance) {
       return (await decideCompletion(q, c.id, true)) ?? { ok: true, note: 'already decided' };
     });
   });
-  app.post('/api/children/:id/stars', { preHandler: requireParent }, async (req) => {
+  app.post('/api/children/:id/stars', { preHandler: requirePerm('children', 2) }, async (req) => {
     const cid = zId.parse((req.params as any).id);
     const { delta, reason } = z.object({ delta: z.number().int().min(-1000).max(1000).refine((n) => n !== 0), reason: zText(120) }).parse(req.body);
     return withActor(req.actor!, async (q) => { await q(`INSERT INTO star_ledger (child_id,delta,reason) VALUES ($1,$2,$3)`, [cid, delta, reason]); await awardBadges(q, cid); return { balance: await balanceOf(q, cid) }; });
   });
-  app.get('/api/reward-claims', { preHandler: requireParent }, async (req) => withActor(req.actor!, (q) =>
+  app.get('/api/reward-claims', { preHandler: requirePerm('children', 1) }, async (req) => withActor(req.actor!, (q) =>
     q(`SELECT rc.id, rc.status, rc.created_at, u.display_name child, r.title, r.icon, r.cost_stars FROM reward_claims rc JOIN users u ON u.id=rc.child_id JOIN rewards r ON r.id=rc.reward_id ORDER BY (rc.status='requested') DESC, rc.created_at DESC LIMIT 50`)));
-  app.post('/api/reward-claims/:id/decide', { preHandler: requireParent }, async (req, reply) => {
+  app.post('/api/reward-claims/:id/decide', { preHandler: requirePerm('children', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { grant } = z.object({ grant: z.boolean() }).parse(req.body);
     return withActor(req.actor!, async (q) => {
