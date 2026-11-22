@@ -7,7 +7,9 @@ import { openDb, migrate, tx, allModuleKeys } from './db.js';
 import { ENTITIES, MODULES, publicMeta, customerBalance } from './entities.js';
 import { initSecret, signToken, readToken, verifyPassword, hashPassword, can, ROLES } from './auth.js';
 import * as engine from './engine.js';
-import { HttpError, bad } from './util.js';
+import { HttpError, bad, isoDate } from './util.js';
+import * as ACC from './accounting.js';
+import { mrp } from './industry.js';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dir, '..', 'public');
@@ -19,6 +21,7 @@ export function createApp({ dataDir, quiet } = {}) {
   initSecret(dataDir);
   const db = openDb(path.join(dataDir, 'erp.db'));
   migrate(db);
+  upgrade(db);
   bootstrapSuperadmin(db, quiet);
 
   const fails = new Map(); // محدودسازی تلاش ورود
@@ -90,6 +93,7 @@ export function createApp({ dataDir, quiet } = {}) {
         const mods = validModules(body.modules);
         const r = tx(db, () => {
           const id = Number(db.prepare('INSERT INTO companies (name,currency,modules) VALUES (?,?,?)').run(name, String(body.currency || 'ریال').slice(0, 20), JSON.stringify(mods)).lastInsertRowid);
+          ACC.seedChart(db, id);
           const c2 = { db, companyId: id, user };
           engine.create(c2, ENTITIES.users, { username: body.admin_username, name: body.admin_name || 'مدیر شرکت', role: 'admin', password: body.admin_password, active: 1 });
           return id;
@@ -107,7 +111,9 @@ export function createApp({ dataDir, quiet } = {}) {
     }
     if (route[0] === 'company' && method === 'PUT') {
       if (!can(user.role, 'admin', 'e') || !ctx.companyId) throw new HttpError(403, 'دسترسی ندارید');
-      db.prepare('UPDATE companies SET name=?, currency=? WHERE id=?').run(String(body.name || '').trim() || ctx.company.name, String(body.currency || ctx.company.currency).slice(0, 20), ctx.companyId);
+      let lock = ctx.company.lock_date;
+      if (body.lock_date !== undefined) { if (body.lock_date && !isoDate(body.lock_date)) throw bad('تاریخ بستن دوره نامعتبر است'); lock = body.lock_date || null; }
+      db.prepare('UPDATE companies SET name=?, currency=?, lock_date=? WHERE id=?').run(String(body.name || '').trim() || ctx.company.name, String(body.currency || ctx.company.currency).slice(0, 20), lock, ctx.companyId);
       return json(res, 200, { ok: true });
     }
 
@@ -135,7 +141,7 @@ export function createApp({ dataDir, quiet } = {}) {
       return res.end(engine.toCsv(ctx, def));
     }
     if (route[0] === 'dashboard' && method === 'GET') return json(res, 200, dashboard(ctx));
-    if (route[0] === 'reports' && method === 'GET') return json(res, 200, report(ctx, route[1]));
+    if (route[0] === 'reports' && method === 'GET') return json(res, 200, report(ctx, route[1], false, Object.fromEntries(url.searchParams)));
     if (route[0] === 'audit' && method === 'GET') {
       if (!can(user.role, 'admin', 'v')) throw new HttpError(403, 'دسترسی ندارید');
       return json(res, 200, db.prepare('SELECT * FROM audit_log WHERE company_id=? ORDER BY id DESC LIMIT 300').all(ctx.companyId));
@@ -170,7 +176,7 @@ export function createApp({ dataDir, quiet } = {}) {
     for (const m of Object.keys(MODULES)) perms[m] = ['v', 'c', 'e', 'd'].filter((a) => can(u.role, m, a)).join('');
     return {
       user: { id: u.id, username: u.username, name: u.name, role: u.role, roleLabel: ROLES[u.role]?.label },
-      company: ctx.company ? { id: ctx.company.id, name: ctx.company.name, currency: ctx.company.currency } : null,
+      company: ctx.company ? { id: ctx.company.id, name: ctx.company.name, currency: ctx.company.currency, lock_date: ctx.company.lock_date } : null,
       modules, perms, isSuper: u.role === 'superadmin',
       allModules: Object.entries(MODULES).filter(([k]) => k !== 'admin').map(([key, v]) => ({ key, title: v.title })),
       meta: Object.fromEntries(Object.values(ENTITIES).map((d) => [d.key, publicMeta(d)])),
@@ -202,6 +208,13 @@ export function createApp({ dataDir, quiet } = {}) {
       add('ar', 'مطالبات از مشتریان', rec.customers.reduce((s, x) => s + Math.max(x.balance, 0), 0), { money: true, link: 'report:balances' });
       add('ap', 'بدهی به تأمین‌کنندگان', rec.suppliers.reduce((s, x) => s + Math.max(x.balance, 0), 0), { money: true, link: 'report:balances' });
     }
+    if (has('accounting')) {
+      const cash = one(`SELECT COALESCE(SUM(g.debit-g.credit),0) n FROM gl_lines g JOIN e_accounts a ON a.id=g.account_id WHERE g.company_id=? AND a.sys_key IN ('cash','bank')`).n;
+      add('cash', 'موجودی نقد و بانک (دفتر کل)', cash, { money: true, link: 'report:trial' });
+      const y = new Date().getFullYear() + '-01-01';
+      add('net', 'سود (زیان) خالص از ابتدای سال میلادی', ACC.incomeStatement(ctx, { from: y }).netIncome, { money: true, link: 'report:income' });
+    }
+    if (has('production')) add('wo', 'دستورهای تولید باز', one(`SELECT COUNT(*) n FROM e_work_orders WHERE company_id=? AND status IN ('draft','released')`).n, { link: 'work_orders' });
     if (has('projects')) {
       add('prj', 'پروژه‌های در حال اجرا', one(`SELECT COUNT(*) n FROM e_projects WHERE company_id=? AND status='active'`).n, { link: 'projects' });
       const od = one(`SELECT COUNT(*) n FROM e_tasks WHERE company_id=? AND status!='done' AND due_date < date('now')`).n;
@@ -215,8 +228,17 @@ export function createApp({ dataDir, quiet } = {}) {
     return d;
   }
 
-  function report(ctx, name, internal) {
+  function report(ctx, name, internal, params = {}) {
     const c = ctx.companyId, u = ctx.user;
+    const acctRep = { trial: ACC.trialBalance, ledger: ACC.ledger, income: ACC.incomeStatement, balance: ACC.balanceSheet };
+    if (acctRep[name]) {
+      if (!(moduleOn(ctx, 'accounting') && can(u.role, 'accounting', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
+      return acctRep[name](ctx, params);
+    }
+    if (name === 'mrp') {
+      if (!(moduleOn(ctx, 'production') && can(u.role, 'production', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
+      return mrp(ctx);
+    }
     if (name === 'stock') {
       if (!internal && !(moduleOn(ctx, 'inventory') && can(u.role, 'inventory', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
       const rows = db.prepare(`SELECT i.id, i.code, i.name, i.unit, i.min_stock, i.cost, w.id wid, w.name warehouse,
@@ -245,6 +267,18 @@ export function createApp({ dataDir, quiet } = {}) {
   }
 
   return { server, db };
+}
+
+function upgrade(db) {
+  const v = db.prepare('PRAGMA user_version').get().user_version;
+  if (v < 2) { // نسخه‌ی ۲: ماژول‌های حسابداری و تولید به شرکت‌های موجود افزوده می‌شود
+    for (const c of db.prepare('SELECT id,modules FROM companies').all()) {
+      const m = new Set(JSON.parse(c.modules)); m.add('accounting'); m.add('production');
+      db.prepare('UPDATE companies SET modules=? WHERE id=?').run(JSON.stringify([...m]), c.id);
+    }
+    db.exec('PRAGMA user_version=2');
+  }
+  for (const c of db.prepare('SELECT id FROM companies').all()) ACC.seedChart(db, c.id);
 }
 
 function validModules(m) {

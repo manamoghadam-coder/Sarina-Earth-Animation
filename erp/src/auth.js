@@ -45,15 +45,17 @@ export function readToken(tok) {
 export const ROLES = {
   superadmin: { label: 'مدیر کل سامانه' },
   admin: { label: 'مدیر شرکت', perms: { '*': 'vced' } },
-  manager: { label: 'مدیر ارشد', perms: { hr: 'vce', inventory: 'vce', purchasing: 'vce', sales: 'vce', finance: 'vce', projects: 'vce', quality: 'vce' } },
+  manager: { label: 'مدیر ارشد', perms: { hr: 'vce', inventory: 'vce', purchasing: 'vce', sales: 'vce', finance: 'vce', accounting: 'v', production: 'vce', projects: 'vce', quality: 'vce' } },
   hr: { label: 'منابع انسانی', perms: { hr: 'vced', projects: 'v' } },
-  inventory: { label: 'انبارداری', perms: { inventory: 'vced', purchasing: 'v', sales: 'v' } },
+  inventory: { label: 'انبارداری', perms: { inventory: 'vced', purchasing: 'v', sales: 'v', production: 'v' } },
+  accountant: { label: 'حسابدار', perms: { accounting: 'vced', finance: 'vced', sales: 'v', purchasing: 'v', inventory: 'v', production: 'v' } },
+  production: { label: 'تولید', perms: { production: 'vced', inventory: 'vce', quality: 'v', projects: 'v' } },
   purchasing: { label: 'خرید', perms: { purchasing: 'vced', inventory: 'v', finance: 'v' } },
   sales: { label: 'فروش', perms: { sales: 'vced', inventory: 'v', finance: 'v' } },
-  finance: { label: 'مالی', perms: { finance: 'vced', sales: 'v', purchasing: 'v', projects: 'v' } },
+  finance: { label: 'مالی', perms: { finance: 'vced', accounting: 'v', sales: 'v', purchasing: 'v', projects: 'v' } },
   project: { label: 'کنترل پروژه (PMO)', perms: { projects: 'vced', quality: 'v', hr: 'v' } },
-  qa: { label: 'تضمین کیفیت (QA)', perms: { quality: 'vced', projects: 'v' } },
-  viewer: { label: 'مشاهده‌گر', perms: { hr: 'v', inventory: 'v', purchasing: 'v', sales: 'v', finance: 'v', projects: 'v', quality: 'v' } },
+  qa: { label: 'تضمین کیفیت (QA)', perms: { quality: 'vced', projects: 'v', production: 'v' } },
+  viewer: { label: 'مشاهده‌گر', perms: { hr: 'v', inventory: 'v', purchasing: 'v', sales: 'v', finance: 'v', accounting: 'v', production: 'v', projects: 'v', quality: 'v' } },
 };
 export function can(role, module, act) {
   if (role === 'superadmin') return true;

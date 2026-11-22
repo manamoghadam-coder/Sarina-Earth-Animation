@@ -25,7 +25,13 @@ export function migrate(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER, user_id INTEGER, username TEXT, entity TEXT, rec_id INTEGER,
       action TEXT NOT NULL, detail TEXT, at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE INDEX IF NOT EXISTS ix_audit_company ON audit_log(company_id, id DESC);
+    CREATE TABLE IF NOT EXISTS gl_lines (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, company_id INTEGER NOT NULL, entry_id INTEGER NOT NULL, account_id INTEGER NOT NULL,
+      date TEXT NOT NULL, debit REAL NOT NULL DEFAULT 0, credit REAL NOT NULL DEFAULT 0, memo TEXT);
+    CREATE INDEX IF NOT EXISTS ix_gl_acc ON gl_lines(company_id, account_id, date);
+    CREATE INDEX IF NOT EXISTS ix_gl_entry ON gl_lines(entry_id);
   `);
+  if (!db.prepare('PRAGMA table_info(companies)').all().some((c) => c.name === 'lock_date')) db.exec('ALTER TABLE companies ADD COLUMN lock_date TEXT');
   for (const def of Object.values(ENTITIES)) {
     const t = 'e_' + def.key;
     const cols = def.fields.map((f) => `"${f.k}" ${SQLTYPE[f.type]}`);
