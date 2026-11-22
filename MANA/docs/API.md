@@ -52,6 +52,20 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 ## MANA AI 🔒
 `POST /ai/message {text}` → `{kind:'proposal'|'answer'|'unknown', proposal_id?, summary?, message}`؛ `POST /ai/proposals/:id/confirm {approve}`. نیت‌ها: رویداد، تراکنش، برنامه‌ی کودک، انجام فعالیت کودک، کار، گزارش هزینه، سه اولویت.
 
-## حساب‌های عضو بزرگسال (🔒 فقط مانا)
-`GET /members` · `PATCH /members/:id {permissions:{tasks?:0-2,events?,finance?,goals?,children?,photos?}, active?}` · `POST /members/:id/password {password}`.
-مسیرهای ماژول‌ها (مثل `/tasks`، `/finance/summary`، `/children`، `/photos`) برای عضو بر اساس سطح (۱ خواندن، ۲ نوشتن) مجازند؛ `/me` فیلد `permissions` را برمی‌گرداند.
+## حساب‌ها و سطح دسترسی همه‌ی کاربران (🔒 فقط مانا)
+`GET /members` (وحید + کودکان) · `PATCH /members/:id {permissions:{…}, active?}` · `POST /members/:id/password {password}`.
+- بخش‌های کاری `tasks, events, finance, goals, children, photos` فقط برای عضو بزرگسال معنا دارند (برای کودک نادیده گرفته می‌شود).
+- ویژگی‌های شخصی برای **همه** (وحید، سارینا، سامان): `diary`، `chat`، `inbox`، `avatar`؛ سطح ۰ بدون دسترسی، ۱ فقط مشاهده، ۲ مشاهده و ویرایش. پیش‌فرض: diary=۲، chat=۲، inbox=۱، avatar=۲.
+- `/me` فیلد `permissions` را برای همه‌ی این کلیدها برمی‌گرداند.
+
+## دفترچه‌ی خاطرات (خصوصی؛ فقط نویسنده — حتی مانا نمی‌بیند)
+`GET /diary` · `POST /diary {title?,body,mood?,entry_date?}` · `PATCH /diary/:id` · `DELETE /diary/:id`.
+
+## پیام‌های مامان
+`GET /mom-messages` (مانا: همه، با `?to_user`؛ دیگران: فقط پیام‌های خودشان) · `POST /mom-messages` 🔒 `{to:[ids]|'all', title?, body, msg_date?}` (برای هر گیرنده یک اعلان «پیام مامان» ساخته می‌شود) · `PATCH/DELETE /mom-messages/:id` 🔒 · `POST /mom-messages/:id/read` · `GET /mom-messages/unread`.
+
+## چت خانوادگی
+`GET /chat[?after=id]` → `{people, messages}` (برای به‌روزرسانی هر ۴ ثانیه) · `POST /chat {body}` · `DELETE /chat/:id` (فرستنده یا مانا) · `GET /chat/unread?after=id`.
+
+## عکس پروفایل خود فرد
+`POST /me/avatar` — `multipart file` (عکس تازه) یا JSON `{photo_id}` (یکی از عکس‌های خود فرد). نیازمند `avatar ≥ ۲`.

@@ -58,5 +58,31 @@ export default async function photoRoutes(app: FastifyInstance) {
     const r = await withActor(req.actor!, (q) => q(`UPDATE users SET avatar_photo_id=$1 WHERE id=(SELECT owner_id FROM photos WHERE id=$1) RETURNING id`, [id]));
     return r[0] ? { ok: true } : reply.code(404).send({ error: 'not_found' });
   });
-  void pipeline; void z;
+  // Every person changes THEIR OWN profile photo: upload a new picture (multipart `file`) or pick one from their own gallery (JSON {photo_id}).
+  app.post('/api/me/avatar', { preHandler: requirePerm('avatar', 2) }, async (req, reply) => {
+    const me = req.actor!.id;
+    if (req.isMultipart()) {
+      const file = await req.file({ limits: { fileSize: MAX, files: 1 } });
+      if (!file) return reply.code(400).send({ error: 'no_file' });
+      const buf = await file.toBuffer();
+      if (file.file.truncated) return reply.code(413).send({ error: 'too_large' });
+      const kind = sniff(buf);
+      if (!kind) return reply.code(415).send({ error: 'unsupported_type', hint: 'JPEG, PNG or WebP only' });
+      const name = `${crypto.randomUUID()}.${kind.ext}`;
+      fs.writeFileSync(path.join(dir(), name), buf, { mode: 0o600 });
+      try {
+        const id = await withActor(req.actor!, async (q) => {
+          const [p] = await q(`INSERT INTO photos (owner_id,file_name,mime,bytes,caption,uploaded_by) VALUES ($1,$2,$3,$4,'پروفایل',$1) RETURNING id`, [me, name, kind.mime, buf.length]);
+          const [ok] = await q(`SELECT set_my_avatar($1) AS ok`, [p.id]);
+          if (!ok.ok) throw Object.assign(new Error('forbidden'), { code: '42501' });
+          return p.id as string;
+        });
+        return reply.code(201).send({ ok: true, avatar_photo_id: id });
+      } catch (e) { fs.rmSync(path.join(dir(), name), { force: true }); throw e; }
+    }
+    const { photo_id } = z.object({ photo_id: zId }).strict().parse(req.body);
+    const [ok] = await withActor(req.actor!, (q) => q(`SELECT set_my_avatar($1) AS ok`, [photo_id]));
+    return ok.ok ? { ok: true, avatar_photo_id: photo_id } : reply.code(404).send({ error: 'not_found' });
+  });
+  void pipeline;
 }

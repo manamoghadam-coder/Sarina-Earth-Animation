@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { COOKIE, MODULES, hashPassword, level, login, logout, requireUser, requireParent, revokeAll, setCookie, verifyPassword } from '../auth.ts';
+import { COOKIE, FEATURES, MODULES, hashPassword, level, login, logout, requireUser, requireParent, revokeAll, setCookie, verifyPassword } from '../auth.ts';
 import { sys, withActor } from '../db.ts';
 import { zId } from '../util.ts';
 
@@ -23,7 +23,7 @@ export default async function authRoutes(app: FastifyInstance) {
   app.get('/api/me', { preHandler: requireUser }, async (req) => withActor(req.actor!, async (q) => {
     const [u] = await q(`SELECT id, username, display_name, role, avatar_photo_id FROM users WHERE id=$1`, [req.actor!.id]);
     const [s] = u.role === 'child' ? await q(`SELECT * FROM child_settings WHERE child_id=$1`, [u.id]) : [null];
-    const permissions = Object.fromEntries(MODULES.map((m) => [m, level(req.actor!, m)]));
+    const permissions = Object.fromEntries([...MODULES, ...FEATURES].map((m) => [m, level(req.actor!, m)]));
     return { ...u, settings: s, permissions };
   }));
   // parent changes own password (requires current)
@@ -43,17 +43,20 @@ export default async function authRoutes(app: FastifyInstance) {
     await withActor(req.actor!, (q) => q(`UPDATE settings SET value=$2::jsonb WHERE key=$1`, [key, JSON.stringify(value)]));
     return { ok: true };
   });
-  // ----- Mana defines what other adults (e.g. Vahid) may do -----
-  app.get('/api/members', { preHandler: requireParent }, async (req) => withActor(req.actor!, (q) => q(`SELECT id, username, display_name, active, permissions FROM users WHERE role='member' ORDER BY display_name`)));
+  // ----- Mana defines what every other account (adults AND children) may do -----
+  // Adult modules apply to role 'member' only; personal features (diary/chat/inbox/avatar) apply to everyone except Mana.
+  app.get('/api/members', { preHandler: requireParent }, async (req) => withActor(req.actor!, (q) => q(`SELECT id, username, display_name, role, active, permissions FROM users WHERE role IN ('member','child') ORDER BY (role='member') DESC, display_name`)));
   app.patch('/api/members/:id', { preHandler: requireParent }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const lv = z.number().int().min(0).max(2);
-    const b = z.object({ permissions: z.object(Object.fromEntries(MODULES.map((m) => [m, lv.optional()])) as any).strict().optional(), active: z.boolean().optional() }).strict().parse(req.body);
+    const b = z.object({ permissions: z.object(Object.fromEntries([...MODULES, ...FEATURES].map((m) => [m, lv.optional()])) as any).strict().optional(), active: z.boolean().optional() }).strict().parse(req.body);
     const r = await withActor(req.actor!, async (q) => {
-      const [u] = await q(`SELECT permissions FROM users WHERE id=$1 AND role='member'`, [id]);
+      const [u] = await q(`SELECT role, permissions FROM users WHERE id=$1 AND role IN ('member','child')`, [id]);
       if (!u) return null;
-      const perms = { ...u.permissions, ...(b.permissions ?? {}) };
-      const [x] = await q(`UPDATE users SET permissions=$2, active=COALESCE($3, active) WHERE id=$1 RETURNING id, username, display_name, active, permissions`, [id, perms, b.active ?? null]);
+      const incoming: Record<string, number> = { ...(b.permissions ?? {}) } as any;
+      if (u.role === 'child') for (const k of MODULES) delete incoming[k];          // adult modules do not apply to children
+      const perms = { ...u.permissions, ...incoming };
+      const [x] = await q(`UPDATE users SET permissions=$2, active=COALESCE($3, active) WHERE id=$1 RETURNING id, username, display_name, role, active, permissions`, [id, perms, b.active ?? null]);
       await q(`INSERT INTO audit_log (user_id, action, detail) VALUES ($1,'member_permissions',$2)`, [req.actor!.id, { member: id, permissions: x.permissions, active: x.active }]);
       return x;
     });
@@ -65,7 +68,7 @@ export default async function authRoutes(app: FastifyInstance) {
     const id = zId.parse((req.params as any).id);
     const { password } = z.object({ password: z.string().min(8).max(100) }).strict().parse(req.body);
     const hash = await hashPassword(password);
-    const rows = await withActor(req.actor!, (q) => q(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1 AND role='member' RETURNING id`, [id, hash]));
+    const rows = await withActor(req.actor!, (q) => q(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1 AND role IN ('member','child') RETURNING id`, [id, hash]));
     if (!rows[0]) return reply.code(404).send({ error: 'not_found' });
     await revokeAll(id);
     return { ok: true };

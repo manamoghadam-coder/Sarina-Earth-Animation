@@ -8,6 +8,7 @@ import { speak, spokenTime, ttsStatus } from '../voice';
 import { PushPanel } from '../notify';
 import { useReadable } from './ReadAloud';
 import { STORIES } from './stories';
+import { useUnread } from '../social/badges';
 
 const TILES = [
   { to: '/today', icon: '📅', title: 'برنامه امروز', desc: 'اینجا می‌توانی برنامه‌ی امروزت را ببینی.', c: 'var(--k1)' },
@@ -16,17 +17,22 @@ const TILES = [
   { to: '/stars', icon: '⭐', title: 'ستاره‌های من', desc: 'اینجا تعداد ستاره‌هایی را که جمع کرده‌ای می‌بینی.', c: 'var(--k2)' },
   { to: '/week', icon: '🗓️', title: 'برنامه هفته', desc: 'اینجا برنامه‌ی کل هفته‌ات را می‌بینی.', c: 'var(--k1)' },
   { to: '/gallery', icon: '🖼️', title: 'عکس‌های من', desc: 'اینجا عکس‌های خودت را می‌بینی.', c: 'var(--k3)' },
-];
+  { to: '/messages', icon: '💌', title: 'پیام مامان', desc: 'اینجا پیام‌ها و نامه‌های مامان را می‌خوانی یا می‌شنوی.', c: 'var(--k4)', perm: 'inbox' },
+  { to: '/diary', icon: '📖', title: 'دفترچه‌ی من', desc: 'اینجا هر چه دلت خواست می‌نویسی. فقط خودت می‌بینی.', c: 'var(--k2)', perm: 'diary' },
+  { to: '/chat', icon: '💬', title: 'چت خانواده', desc: 'اینجا با مامان و بابا و برادر یا خواهرت پیام می‌دهی.', c: 'var(--k1)', perm: 'chat' },
+  { to: '/profile', icon: '🙂', title: 'عکس پروفایل', desc: 'اینجا عکس پروفایل خودت را عوض می‌کنی.', c: 'var(--k3)', perm: 'avatar' },
+] as { to: string; icon: string; title: string; desc: string; c: string; perm?: string }[];
 export function Home() {
   const { me } = useAuth(); const go = useNavigate(); const photos = useLoad(() => api<any[]>('/photos')); const today = useLoad(() => api<any>('/child/today'));
-  const tiles = me!.username === 'saman' ? TILES : TILES.filter((t) => t.to !== '/homework');
+  const { chat, inbox } = useUnread();
+  const tiles = (me!.username === 'saman' ? TILES : TILES.filter((t) => t.to !== '/homework')).filter((t) => !t.perm || (me!.permissions[t.perm] ?? 0) >= 1);
   const [tested, setTested] = useState(false);
   useReadable(tiles.map((t) => `${t.title}. ${t.desc}`));
   return <>
     {photos.data && photos.data.length > 0 && <div className="flex gap-2 overflow-x-auto pb-1" aria-label="عکس‌های من">{photos.data.slice(0, 6).map((p) => <img key={p.id} src={photoUrl(p.id)} alt="" className="h-28 w-28 rounded-3xl object-cover flex-none shadow" />)}</div>}
     {today.data && <div className="kid-card flex items-center justify-between text-xl"><span>⭐ {fa(today.data.balance)} ستاره</span><span className="text-sm opacity-70">این هفته {fa(today.data.week_stars)} از {fa(today.data.settings.weekly_goal_stars)}</span></div>}
     <div className="grid grid-cols-2 gap-4">{tiles.map((t) => <div key={t.to} className="relative">
-      <button className="kid-tile w-full" style={{ background: t.c }} onClick={() => { void speak(`${t.title}. ${t.desc}`); go(t.to); }}><span className="text-6xl" aria-hidden>{t.icon}</span><span className="text-xl">{t.title}</span></button>
+      <button className="kid-tile w-full" style={{ background: t.c }} onClick={() => { void speak(`${t.title}. ${t.desc}`); go(t.to); }}><span className="text-6xl" aria-hidden>{t.icon}</span><span className="text-xl">{t.title}</span>{(t.to === '/chat' ? chat : t.to === '/messages' ? inbox : 0) > 0 && <span className="absolute top-2 end-2 rounded-full bg-red-500 text-white text-base px-2">{fa(t.to === '/chat' ? chat : inbox)}</span>}</button>
       <button aria-label={`بشنو: ${t.title}`} className="absolute top-2 start-2 w-11 h-11 rounded-full bg-white/90 text-xl shadow" onClick={() => speak(`${t.title}. ${t.desc}`)}>🔊</button></div>)}</div>
     <div className="kid-card space-y-2"><PushPanel big />
       <button className="btn btn-ghost w-full" onClick={() => { setTested(true); void speak(`سلام ${me!.display_name} جان! اگر صدای من را می‌شنوی، همه چیز درست است.`); }}>🔈 آزمایش صدا</button>

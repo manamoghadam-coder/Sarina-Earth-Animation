@@ -48,7 +48,7 @@ export async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   if (!token) return reply.code(401).send({ error: 'unauthenticated' });
   const [s] = await sys(`SELECT u.id, u.role, u.permissions FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha(token)]);
   if (!s) return reply.code(401).send({ error: 'unauthenticated' });
-  req.actor = { id: s.id, role: s.role, perms: s.role === 'member' ? s.permissions : undefined };
+  req.actor = { id: s.id, role: s.role, perms: s.role === 'parent' ? undefined : s.permissions };
   // CSRF defence in depth (cookie is SameSite=Strict): state-changing requests must be same-origin XHR/fetch
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-requested-with'] !== 'mana') return reply.code(403).send({ error: 'csrf' });
 }
@@ -59,9 +59,18 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
 }
 
 export const MODULES = ['tasks', 'events', 'finance', 'goals', 'children', 'photos'] as const;
-export const level = (a: Actor, m: string) => (a.role === 'parent' ? 2 : a.role === 'member' ? Math.min(2, Math.max(0, Number(a.perms?.[m] ?? 0))) : 0);
+/** Personal features every non-parent account has; Mana sets 0=none 1=view 2=view+write per user. */
+export const FEATURES = ['diary', 'chat', 'inbox', 'avatar'] as const;
+export const FEATURE_DEFAULT: Record<(typeof FEATURES)[number], number> = { diary: 2, chat: 2, inbox: 1, avatar: 2 };
+const clamp = (n: unknown) => Math.min(2, Math.max(0, Number(n) || 0));
+export const isFeature = (m: string): m is (typeof FEATURES)[number] => (FEATURES as readonly string[]).includes(m);
+export const level = (a: Actor, m: string) => {
+  if (a.role === 'parent') return 2;
+  if (isFeature(m)) return a.perms?.[m] === undefined ? FEATURE_DEFAULT[m] : clamp(a.perms[m]);
+  return a.role === 'member' ? clamp(a.perms?.[m]) : 0;
+};
 /** API-level gate (the database enforces the same rule through RLS). need: 1=read, 2=write. */
-export const requirePerm = (m: (typeof MODULES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {
+export const requirePerm = (m: (typeof MODULES)[number] | (typeof FEATURES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {
   await requireUser(req, reply);
   if (reply.sent) return;
   if (level(req.actor!, m) < need) return reply.code(403).send({ error: 'forbidden' });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, errText } from './api';
 import { speak } from './voice';
 import { useToast } from './ui';
@@ -8,6 +9,7 @@ const b64 = (s: string) => { const p = '='.repeat((4 - (s.length % 4)) % 4); con
 
 /** In-app delivery: polls due notifications; optionally reads them aloud (children with voice notifications). */
 export function NotificationCenter({ speakAloud, kid, paused }: { speakAloud: boolean; kid?: boolean; paused?: boolean }) {
+  const go = useNavigate();
   const [queue, setQueue] = useState<Notif[]>([]); const spoken = useRef(new Set<string>()); const toast = useToast();
   useEffect(() => {
     let live = true;
@@ -24,7 +26,8 @@ export function NotificationCenter({ speakAloud, kid, paused }: { speakAloud: bo
       {speakAloud && <button aria-label="دوباره بخوان" className="btn btn-ghost !px-3" onClick={() => speak(cur.voice_text ?? cur.body)}>🔊</button>}</div>
     <div className="flex gap-2 mt-3 flex-wrap">
       {(cur.ref_type === 'activity' || cur.ref_type === 'task') && <button className="btn btn-teal flex-1" onClick={() => act('done')}>انجام شد ✅</button>}
-      <button className="btn btn-ghost flex-1" onClick={() => act('snooze')}>۱۰ دقیقه بعد ⏰</button>
+      {cur.ref_type === 'mom_message' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/messages'); }}>💌 بخوان</button>}
+      {cur.ref_type !== 'mom_message' && <button className="btn btn-ghost flex-1" onClick={() => act('snooze')}>۱۰ دقیقه بعد ⏰</button>}
       <button className="btn btn-ghost flex-1" onClick={() => act('seen')}>باشه</button></div>
     {queue.length > 1 && <p className="text-xs text-slate-500 mt-2">{queue.length - 1} اعلان دیگر</p>}</div>;
 }

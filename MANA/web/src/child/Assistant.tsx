@@ -29,6 +29,16 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
       case 'next': { const u = upcoming(); return say(u ? `بعدش ${u.title} داری، ${spokenTime(u.start_time)}.` : 'دیگر کاری برای بعد نداری. آفرین!'); }
       case 'stars': return say(`تو الان ${stars} ستاره داری. ${stars >= 10 ? 'آفرین!' : 'ادامه بده!'}`);
       case 'story': { const s = STORIES[Math.floor(Math.random() * STORIES.length)]; go('/stories'); await say(`قصه‌ی ${s.title}. ${s.text}`); return; }
+      case 'diary': go('/diary'); onClose(); return speak('دفترچه‌ی خاطراتت را باز کردم. هر چه دلت خواست بنویس. اگر بخواهی با صدا بنویسی، بگو: در دفترچه بنویس، و بعد حرفت را.');
+      case 'chat': go('/chat'); onClose(); return speak('چت خانواده را باز کردم.');
+      case 'profile': go('/profile'); onClose(); return speak('اینجا می‌توانی عکس پروفایلت را عوض کنی.');
+      case 'mom': {
+        try { const list = await api<any[]>('/mom-messages'); const m = list.find((x) => !x.read_at) ?? list[0];
+          if (!m) return say('مامان هنوز پیامی برایت ننوشته.');
+          void api(`/mom-messages/${m.id}/read`, { method: 'POST', body: {} }).then(() => window.dispatchEvent(new Event('mana-inbox-changed'))).catch(() => {});
+          return say(`پیام مامان. ${m.title ? m.title + '. ' : ''}${m.body}`);
+        } catch { return say('الان نتوانستم پیام‌ها را بخوانم.'); }
+      }
       case 'done': {
         const p = pending(); if (!p.length) return say('همه‌ی کارهای امروزت را گزارش کرده‌ای. آفرین!');
         const c = current(); if (p.length > 1 && !c) { setChoose(p); return say('کدام کار را انجام دادی؟ روی آن بزن.'); }
@@ -41,7 +51,16 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
   };
   const ask = async (it: Item) => { setChoose(null); const yes = async () => { try { const r = await api<any>('/child/complete', { body: { activity_id: it.id } }); setItems((x) => x.map((y) => (y.id === it.id ? { ...y, completion: 'pending' } : y))); await say(r.status === 'already_reported' ? 'قبلاً گفته بودی. مامان به‌زودی نگاه می‌کند.' : `آفرین ${name}! به مامان خبر دادم. وقتی تأیید کند ستاره‌ات را می‌گیری.`); } catch (e) { await say('نتوانستم ثبت کنم. ' + errText(e)); } };
     setConfirm({ text: `«${it.title}» را انجام دادی؟`, yes }); await say(`«${it.title}» را انجام دادی؟ بله یا نه؟`); };
-  const handle = async (text: string) => { setSaid(text); await run(matchCommand(text)); };
+  // «در دفترچه بنویس ...» → asks for confirmation, then saves a private diary entry
+  const handle = async (text: string) => {
+    setSaid(text);
+    const m = text.replace(/ي/g, 'ی').replace(/ك/g, 'ک').match(/(?:دفترچه|دفتر خاطرات|دفتر)(?: من| ام)? (?:بنویس|بنویسم|ثبت کن)[:،, ]*(.{3,})$/);
+    if (m && (me!.permissions.diary ?? 0) >= 2) {
+      const body = m[1].trim(); setConfirm({ text: `در دفترچه بنویسم: «${body}»؟`, yes: async () => { try { await api('/diary', { body: { body } }); await say('در دفترچه‌ات نوشتم. فقط خودت می‌بینی.'); } catch (e) { await say(errText(e)); } } });
+      return say(`در دفترچه بنویسم: ${body}؟ بله یا نه؟`);
+    }
+    await run(matchCommand(text));
+  };
   const mic = () => {
     if (listening) { stopRef.current(); return; }
     if (!micOk) { void say('مامان هنوز اجازه‌ی میکروفون را نداده. از دکمه‌های تصویری استفاده کن.'); return; }

@@ -24,7 +24,7 @@ export function useAction() { const toast = useToast(); return async (fn: () => 
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   useEffect(() => { const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onClose]);
-  return <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
+  return <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4" onClick={onClose}>
     <div role="dialog" aria-modal="true" aria-label={title} className="bg-white w-full sm:max-w-lg max-h-[92vh] overflow-auto rounded-t-3xl sm:rounded-3xl p-5" onClick={(e) => e.stopPropagation()}>
       <div className="flex items-center justify-between mb-3"><h3 className="text-lg font-bold">{title}</h3><button aria-label="بستن" className="btn btn-ghost !px-3" onClick={onClose}>✕</button></div>{children}</div></div>;
 }
