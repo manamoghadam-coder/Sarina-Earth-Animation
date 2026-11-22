@@ -455,7 +455,8 @@ await t('RBAC حقوق: HR و حسابدار دسترسی دارند، فروش 
   const hr3 = await client('demo_hr', 'demo1234'), ac = await client('demo_accountant', 'demo1234'), sl = await client('demo_sales', 'demo1234'), vw = await client('demo_viewer', 'demo1234');
   assert.equal((await hr3.call('GET', '/entities/payroll_runs')).status, 200); assert.equal((await ac.call('GET', '/entities/payslips')).status, 200);
   assert.equal((await sl.call('GET', '/entities/payslips')).status, 403); assert.equal((await vw.call('GET', '/entities/payslips')).status, 403);
-  assert.equal((await admin.call('GET', '/entities/payslips')).data.total, 0); // ایزولاسیون: شرکت اول فیشی ندارد
+  assert.equal((await admin.call('GET', '/entities/payslips')).data.total, 3);   // ایزولاسیون: شرکت اول فقط ۳ فیش نمونه‌ی خودش را می‌بیند
+  assert.equal((await second.call('GET', '/entities/payslips')).data.total, 4);  // و شرکت دوم فقط فیش‌های خودش را (۲ دوره‌ی هفتم + ۲ دوره‌ی لغوشده‌ی هشتم)
 });
 
 console.log(`\n${passed} تست موفق`);
