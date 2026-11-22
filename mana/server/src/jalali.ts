@@ -42,7 +42,8 @@ export function addJalaliMonth(iso: string, n = 1) {
   const day = Math.min(j.jd, jalaali.jalaaliMonthLength(y, m));
   return fromJalali(y, m, day);
 }
-export const fmtJalali = (iso: string) => { const j = toJalali(iso); return `${WEEKDAYS[persianWeekday(iso)]} ${j.jd} ${MONTHS[j.jm - 1]} ${j.jy}`; };
+export const toFaDigits = (s: string | number) => String(s).replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+export const fmtJalali = (iso: string) => { const j = toJalali(iso); return `${WEEKDAYS[persianWeekday(iso)]} ${toFaDigits(j.jd)} ${MONTHS[j.jm - 1]} ${toFaDigits(j.jy)}`; };
 /** Instant for a Tehran wall-clock date+time (Iran has no DST since 2022; offset resolved via Intl to be safe). */
 export function tehranInstant(iso: string, hhmm: string) {
   const [y, m, d] = iso.split('-').map(Number);

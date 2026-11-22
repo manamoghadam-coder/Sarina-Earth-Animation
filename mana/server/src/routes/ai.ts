@@ -7,6 +7,8 @@ import { fmtJalali, jalaliMonthRange, tehranInstant, toJalali, todayISO } from '
 import { decideCompletion } from '../rewards.ts';
 import { fmtMoney, zId } from '../util.ts';
 
+const faDigits = (s: string) => s.replace(/\d/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[+d]);
+
 const intentSchema = z.discriminatedUnion('intent', [
   z.object({ intent: z.literal('create_event'), title: z.string().min(1).max(200), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), time: z.string().regex(/^\d{2}:\d{2}$/) }),
   z.object({ intent: z.literal('create_transaction'), kind: z.enum(['income', 'expense']), amount: z.number().int().positive().max(1e13), category: z.string().max(60), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), note: z.string().max(300) }),
@@ -74,7 +76,7 @@ export default async function aiRoutes(app: FastifyInstance) {
       if (!parsed.success) return { kind: 'unknown', source, message: 'اطلاعات کافی برای ثبت نبود (مثلاً تاریخ یا ساعت). لطفاً دقیق‌تر بنویسید.' };
       const summary = summarize(parsed.data);
       const [p] = await q(`INSERT INTO ai_proposals (user_id,input,intent,params,summary) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [req.actor!.id, text, parsed.data.intent, parsed.data, summary]);
-      return { kind: 'proposal', source, proposal_id: p.id, summary, message: `${summary}\nتأیید می‌کنید؟` };
+      return { kind: 'proposal', source, proposal_id: p.id, summary: faDigits(summary), message: faDigits(`${summary}\nتأیید می‌کنید؟`) };
     });
   });
   app.post('/api/ai/proposals/:id/confirm', { preHandler: requireParent }, async (req, reply) => {

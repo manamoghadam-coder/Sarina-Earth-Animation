@@ -1,0 +1,99 @@
+import { useState } from 'react';
+import { api, photoUrl } from '../api';
+import { WEEKDAYS, fa, fmtDate, instantFa, fmtTime } from '../jalali';
+import { Avatar, DateField, Empty, Field, Loading, Modal, useAction, useLoad, useToast } from '../ui';
+
+const KINDS: Record<string, string> = { homework: 'تکالیف', study: 'مطالعه درسی', class: 'کلاس', music: 'موسیقی', language: 'زبان', reading: 'کتاب', chore: 'کار خانه', story: 'قصه', writing: 'نوشتن', game: 'بازی', other: 'سایر' };
+const ICONS = ['✏️', '📖', '🎵', '💃', '🎤', '📜', '🔤', '🖍️', '📚', '🐻', '🧸', '⭐', '🎨', '🏃'];
+const TABS = [['plan', '🗓 برنامه'], ['approve', '⭐ تأییدها'], ['rewards', '🎁 جوایز و اهداف'], ['photos', '🖼 تصاویر'], ['notif', '🔔 اعلان‌ها و تنظیمات']] as const;
+
+export default function Family() {
+  const kids = useLoad(() => api<any[]>('/children')); const [sel, setSel] = useState<string | null>(null); const [tab, setTab] = useState<(typeof TABS)[number][0]>('plan');
+  if (!kids.data) return <Loading error={kids.error} loading={kids.loading} />;
+  const kid = kids.data.find((k) => k.id === sel) ?? kids.data[0];
+  if (!kid) return <Empty>حساب کودکی تعریف نشده.</Empty>;
+  return <div className="space-y-3"><h1 className="text-xl font-extrabold">خانواده</h1>
+    <div className="flex gap-2">{kids.data.map((k) => <button key={k.id} onClick={() => setSel(k.id)} className={`card flex items-center gap-2 flex-1 ${k.id === kid.id ? '!border-teal-mana !bg-teal-soft' : ''}`}><Avatar id={k.avatar_photo_id} name={k.display_name} /><div className="text-start"><b>{k.display_name}</b><div className="text-xs">⭐ {fa(k.balance)} ستاره</div></div></button>)}</div>
+    <div className="flex gap-2 overflow-x-auto pb-1">{TABS.map(([k, t]) => <button key={k} className={`btn whitespace-nowrap ${tab === k ? '' : 'btn-ghost'}`} onClick={() => setTab(k)}>{t}</button>)}</div>
+    {tab === 'plan' && <Plan kid={kid} />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}
+    {tab === 'photos' && <Photos kid={kid} reloadKids={kids.reload} />}{tab === 'notif' && <NotifSettings kid={kid} reload={kids.reload} />}</div>;
+}
+
+function Plan({ kid }: { kid: any }) {
+  const acts = useLoad(() => api<any[]>(`/activities?child_id=${kid.id}`), [kid.id]); const [e, setE] = useState<any | null>(null); const act = useAction();
+  const blank = { child_id: kid.id, title: '', kind: 'homework', icon: '✏️', mode: 'weekly', weekdays: [0, 1, 2, 3, 4], on_date: null, start_time: '', end_time: '', stars: 3, notify: true, notify_text: '', offsets: '' };
+  return <div><div className="flex justify-between mb-2"><b>برنامه‌ی هفتگی {kid.display_name}</b><button className="btn btn-teal" onClick={() => setE(blank)}>＋ فعالیت</button></div>
+    <Loading error={acts.error} loading={acts.loading} />
+    {WEEKDAYS.map((w, d) => { const list = (acts.data ?? []).filter((a) => a.active && a.weekdays?.includes(d)); return list.length ? <div key={w} className="mb-2"><div className="text-sm font-bold text-slate-600">{w}</div>
+      {list.map((a) => <button key={a.id} className="card w-full text-start flex gap-3 items-center mb-1" onClick={() => setE({ ...a, mode: 'weekly', start_time: a.start_time ?? '', end_time: a.end_time ?? '', notify_text: a.notify_text ?? '', offsets: (a.remind_offsets ?? []).join(',') })}><span className="text-2xl">{a.icon}</span><span className="flex-1"><b>{a.title}</b><span className="text-xs text-slate-500 block">{a.start_time ? `${fmtTime(a.start_time)}–${fmtTime(a.end_time)}` : 'بدون ساعت (بدون اعلان)'} · {fa(a.stars)} ستاره {a.notify ? '· 🔔' : ''}</span></span></button>)}</div> : null; })}
+    {(acts.data ?? []).filter((a) => a.on_date).length > 0 && <div><div className="text-sm font-bold text-slate-600">یک‌بار</div>{acts.data!.filter((a) => a.on_date).map((a) => <button key={a.id} className="card w-full text-start mb-1" onClick={() => setE({ ...a, mode: 'once', start_time: a.start_time ?? '', end_time: a.end_time ?? '', notify_text: a.notify_text ?? '', offsets: (a.remind_offsets ?? []).join(',') })}>{a.icon} {a.title} — {fmtDate(a.on_date)} {fmtTime(a.start_time)}</button>)}</div>}
+    {e && <Modal title={e.id ? 'ویرایش فعالیت' : 'فعالیت جدید'} onClose={() => setE(null)}>
+      <Field label="عنوان"><input className="input" value={e.title} onChange={(x) => setE({ ...e, title: x.target.value })} /></Field>
+      <div className="grid grid-cols-2 gap-2"><Field label="نوع"><select className="input" value={e.kind} onChange={(x) => setE({ ...e, kind: x.target.value })}>{Object.entries(KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
+        <Field label="ستاره"><input type="number" min={0} className="input" value={e.stars} onChange={(x) => setE({ ...e, stars: +x.target.value })} /></Field></div>
+      <Field label="آیکون"><div className="flex flex-wrap gap-1">{ICONS.map((i) => <button key={i} type="button" className={`text-2xl rounded-lg p-1 ${e.icon === i ? 'bg-teal-soft ring-2 ring-teal-mana' : ''}`} onClick={() => setE({ ...e, icon: i })}>{i}</button>)}</div></Field>
+      <div className="flex gap-2 mb-2"><button className={`btn flex-1 ${e.mode === 'weekly' ? '' : 'btn-ghost'}`} onClick={() => setE({ ...e, mode: 'weekly', weekdays: e.weekdays ?? [0], on_date: null })}>هفتگی</button><button className={`btn flex-1 ${e.mode === 'once' ? '' : 'btn-ghost'}`} onClick={() => setE({ ...e, mode: 'once', weekdays: null, on_date: e.on_date ?? new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date()) })}>یک‌بار</button></div>
+      {e.mode === 'weekly' ? <div className="flex flex-wrap gap-1 mb-3">{WEEKDAYS.map((w, d) => <button key={w} type="button" className={`chip !px-3 !py-1.5 ${e.weekdays?.includes(d) ? '!bg-teal-mana text-white' : ''}`} onClick={() => setE({ ...e, weekdays: e.weekdays?.includes(d) ? e.weekdays.filter((z: number) => z !== d) : [...(e.weekdays ?? []), d] })}>{w}</button>)}</div>
+        : <Field label="تاریخ"><DateField value={e.on_date} onChange={(v) => setE({ ...e, on_date: v })} /></Field>}
+      <div className="grid grid-cols-2 gap-2"><Field label="شروع"><input type="time" className="input" value={e.start_time} onChange={(x) => setE({ ...e, start_time: x.target.value })} /></Field><Field label="پایان"><input type="time" className="input" value={e.end_time} onChange={(x) => setE({ ...e, end_time: x.target.value })} /></Field></div>
+      <label className="flex items-center gap-2 mb-3"><input type="checkbox" className="w-5 h-5" checked={e.notify} onChange={(x) => setE({ ...e, notify: x.target.checked })} /> اعلان داشته باشد (نیازمند ساعت شروع)</label>
+      <Field label="متن اعلان اختصاصی (اختیاری)"><input className="input" value={e.notify_text} onChange={(x) => setE({ ...e, notify_text: x.target.value })} placeholder="مثلاً: وقت تمرین سنتوره! 🎵" /></Field>
+      <Field label="یادآوری‌های این فعالیت — دقیقه نسبت به شروع (خالی = پیش‌فرض کودک)، مثل: -15,0,10"><input className="input" dir="ltr" value={e.offsets} onChange={(x) => setE({ ...e, offsets: x.target.value })} /></Field>
+      <div className="flex gap-2"><button className="btn btn-teal flex-1" disabled={!e.title.trim() || (e.mode === 'weekly' && !e.weekdays?.length)} onClick={() => act(async () => {
+        const offs = e.offsets.trim() ? e.offsets.split(',').map((s: string) => parseInt(s.trim(), 10)).filter((n: number) => !Number.isNaN(n)) : null;
+        const b: any = { child_id: kid.id, title: e.title, kind: e.kind, icon: e.icon, stars: e.stars, weekdays: e.mode === 'weekly' ? e.weekdays : null, on_date: e.mode === 'once' ? e.on_date : null, start_time: e.start_time || null, end_time: e.end_time || null, notify: !!e.start_time && e.notify, notify_text: e.notify_text || null, remind_offsets: offs };
+        if (e.id) { delete b.child_id; await api(`/activities/${e.id}`, { method: 'PATCH', body: b }); } else await api('/activities', { body: b }); setE(null); await acts.reload(); }, 'ذخیره شد')}>ذخیره</button>
+        {e.id && <button className="btn btn-danger" onClick={() => confirm('حذف شود؟') && act(async () => { await api(`/activities/${e.id}`, { method: 'DELETE' }); setE(null); await acts.reload(); })}>حذف</button>}</div></Modal>}
+  </div>;
+}
+
+function Approvals({ reloadKids }: { reloadKids: () => Promise<void> }) {
+  const pend = useLoad(() => api<any[]>('/completions?status=pending')); const claims = useLoad(() => api<any[]>('/reward-claims')); const act = useAction();
+  const reload = async () => { await Promise.all([pend.reload(), claims.reload(), reloadKids()]); };
+  return <div className="space-y-3"><section className="card"><h2 className="font-bold mb-2">انجام فعالیت — منتظر تأیید</h2>{!pend.data?.length && <Empty>موردی نیست.</Empty>}
+    {pend.data?.map((c) => <div key={c.id} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"><span>{c.icon} {c.child}: <b>{c.title}</b> <span className="text-xs text-slate-500">{fmtDate(c.day, false)} · {fa(c.stars)} ستاره</span></span>
+      <span className="flex gap-1"><button className="btn btn-teal !py-1" onClick={() => act(async () => { await api(`/completions/${c.id}/decide`, { body: { approve: true } }); await reload(); }, 'ستاره‌ها ثبت شد')}>تأیید</button><button className="btn btn-ghost !py-1" onClick={() => act(async () => { await api(`/completions/${c.id}/decide`, { body: { approve: false } }); await reload(); })}>رد</button></span></div>)}</section>
+    <section className="card"><h2 className="font-bold mb-2">درخواست جایزه</h2>{!claims.data?.length && <Empty>درخواستی نیست.</Empty>}
+      {claims.data?.map((c) => <div key={c.id} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"><span>{c.icon} {c.child}: <b>{c.title}</b> ({fa(c.cost_stars)} ستاره) <span className="chip">{({ requested: 'درخواست', granted: 'داده شد', rejected: 'رد شد' } as any)[c.status]}</span></span>
+        {c.status === 'requested' && <span className="flex gap-1"><button className="btn btn-teal !py-1" onClick={() => act(async () => { await api(`/reward-claims/${c.id}/decide`, { body: { grant: true } }); await reload(); }, 'جایزه ثبت شد')}>دادم</button><button className="btn btn-ghost !py-1" onClick={() => act(async () => { await api(`/reward-claims/${c.id}/decide`, { body: { grant: false } }); await reload(); })}>رد</button></span>}</div>)}</section></div>;
+}
+
+function Rewards({ kid, reloadKids }: { kid: any; reloadKids: () => Promise<void> }) {
+  const rw = useLoad(() => api<any[]>(`/rewards?child_id=${kid.id}`), [kid.id]); const goals = useLoad(() => api<any[]>(`/child-goals?child_id=${kid.id}`), [kid.id]); const act = useAction();
+  const [r, setR] = useState({ title: '', icon: '🎁', cost: 30 }); const [g, setG] = useState(''); const [adj, setAdj] = useState({ delta: 1, reason: '' });
+  return <div className="space-y-3">
+    <section className="card"><h2 className="font-bold mb-2">🎁 جوایز {kid.display_name}</h2>{rw.data?.map((x) => <div key={x.id} className="flex justify-between py-1"><span>{x.icon} {x.title} — {fa(x.cost_stars)} ستاره</span><button className="text-red-600" aria-label="حذف" onClick={() => act(async () => { await api(`/rewards/${x.id}`, { method: 'DELETE' }); await rw.reload(); })}>🗑</button></div>)}
+      <div className="flex gap-2 mt-2"><input className="input !w-16 text-center" value={r.icon} onChange={(e) => setR({ ...r, icon: e.target.value })} aria-label="آیکون" /><input className="input" placeholder="عنوان جایزه" value={r.title} onChange={(e) => setR({ ...r, title: e.target.value })} /><input type="number" min={1} className="input !w-24" aria-label="ستاره" value={r.cost} onChange={(e) => setR({ ...r, cost: +e.target.value })} />
+        <button className="btn btn-teal" disabled={!r.title.trim()} onClick={() => act(async () => { await api('/rewards', { body: { child_id: kid.id, title: r.title, icon: r.icon, cost_stars: r.cost } }); setR({ ...r, title: '' }); await rw.reload(); })}>＋</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">🎯 اهداف</h2>{goals.data?.map((x) => <div key={x.id} className="flex justify-between py-1"><label><input type="checkbox" className="me-2" checked={x.done} onChange={(e) => act(async () => { await api(`/child-goals/${x.id}`, { method: 'PATCH', body: { done: e.target.checked } }); await goals.reload(); })} />{x.icon} {x.title}</label><button className="text-red-600" aria-label="حذف" onClick={() => act(async () => { await api(`/child-goals/${x.id}`, { method: 'DELETE' }); await goals.reload(); })}>🗑</button></div>)}
+      <div className="flex gap-2 mt-2"><input className="input" placeholder="هدف جدید" value={g} onChange={(e) => setG(e.target.value)} /><button className="btn btn-teal" disabled={!g.trim()} onClick={() => act(async () => { await api('/child-goals', { body: { child_id: kid.id, title: g } }); setG(''); await goals.reload(); })}>＋</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">تنظیم دستی ستاره (پاداش یا کسر)</h2><div className="flex gap-2"><input type="number" className="input !w-24" value={adj.delta} onChange={(e) => setAdj({ ...adj, delta: +e.target.value })} aria-label="تعداد" /><input className="input" placeholder="دلیل" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} />
+      <button className="btn" disabled={!adj.reason.trim() || !adj.delta} onClick={() => act(async () => { await api(`/children/${kid.id}/stars`, { body: adj }); setAdj({ delta: 1, reason: '' }); await reloadKids(); }, 'ثبت شد')}>ثبت</button></div></section></div>;
+}
+
+function Photos({ kid, reloadKids }: { kid: any; reloadKids: () => Promise<void> }) {
+  const ph = useLoad(() => api<any[]>(`/photos?owner_id=${kid.id}`), [kid.id]); const act = useAction(); const toast = useToast();
+  const upload = async (files: FileList | null) => { if (!files) return; for (const f of Array.from(files)) { const fd = new FormData(); fd.append('file', f); if (!(await act(() => api(`/users/${kid.id}/photos`, { form: fd })))) break; } toast('بارگذاری شد'); await ph.reload(); };
+  return <div><p className="text-sm text-slate-600 mb-2">این تصاویر فقط برای {kid.display_name} و شما قابل مشاهده‌اند. فقط JPEG/PNG/WebP تا ۸ مگابایت.</p>
+    <label className="btn btn-teal mb-3 cursor-pointer">＋ بارگذاری تصویر<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} /></label>
+    <Loading error={ph.error} loading={ph.loading} />{ph.data?.length === 0 && <Empty>هنوز تصویری نیست.</Empty>}
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">{ph.data?.map((p) => <figure key={p.id} className="card !p-2"><img src={photoUrl(p.id)} alt={p.caption ?? 'تصویر'} className="w-full aspect-square object-cover rounded-lg" loading="lazy" />
+      <figcaption className="flex gap-1 mt-2 text-xs">{kid.avatar_photo_id === p.id ? <span className="chip bg-teal-100">عکس پروفایل</span> : <button className="btn btn-ghost !py-1 !min-h-0 flex-1" onClick={() => act(async () => { await api(`/photos/${p.id}/avatar`, { body: {} }); await reloadKids(); }, 'پروفایل تغییر کرد')}>پروفایل</button>}
+        <button className="btn btn-ghost !py-1 !min-h-0" aria-label="حذف" onClick={() => confirm('این تصویر برای همیشه حذف شود؟') && act(async () => { await api(`/photos/${p.id}`, { method: 'DELETE' }); await ph.reload(); await reloadKids(); })}>🗑</button></figcaption></figure>)}</div></div>;
+}
+
+function NotifSettings({ kid, reload }: { kid: any; reload: () => Promise<void> }) {
+  const hist = useLoad(() => api<any[]>(`/notifications/history?user_id=${kid.id}`), [kid.id]); const act = useAction(); const [pw, setPw] = useState(''); const [offs, setOffs] = useState((kid.reminder_offsets ?? []).join(','));
+  const save = (patch: any) => act(async () => { await api(`/children/${kid.id}/settings`, { method: 'PATCH', body: patch }); await reload(); }, 'ذخیره شد');
+  const Toggle = ({ k, label }: { k: string; label: string }) => <label className="flex items-center gap-2 py-1"><input type="checkbox" className="w-5 h-5" checked={kid[k]} onChange={(e) => save({ [k]: e.target.checked })} />{label}</label>;
+  return <div className="space-y-3"><section className="card"><h2 className="font-bold mb-2">تنظیمات {kid.display_name}</h2>
+    <Toggle k="notifications_enabled" label="اعلان‌ها فعال باشد" /><Toggle k="voice_notifications" label="اعلان با صدا خوانده شود" /><Toggle k="read_aloud_default" label="«برایم بخوان» به‌طور پیش‌فرض روشن باشد" /><Toggle k="mic_allowed" label="اجازه‌ی استفاده از میکروفون (فرمان صوتی) — صدا ذخیره نمی‌شود" />
+    <div className="grid grid-cols-2 gap-2 mt-2"><Field label="شروع ساعت سکوت"><input type="time" className="input" defaultValue={kid.quiet_start} onBlur={(e) => e.target.value && e.target.value !== kid.quiet_start && save({ quiet_start: e.target.value })} /></Field>
+      <Field label="پایان ساعت سکوت"><input type="time" className="input" defaultValue={kid.quiet_end} onBlur={(e) => e.target.value && e.target.value !== kid.quiet_end && save({ quiet_end: e.target.value })} /></Field></div>
+    <Field label="یادآوری‌های پیش‌فرض (دقیقه نسبت به شروع): −۱۵ یعنی ۱۵ دقیقه قبل، ۱۰ یعنی ۱۰ دقیقه بعد اگر انجام نشده"><div className="flex gap-2"><input className="input" dir="ltr" value={offs} onChange={(e) => setOffs(e.target.value)} /><button className="btn" onClick={() => { const a = offs.split(',').map((s: string) => parseInt(s.trim(), 10)).filter((n: number) => !Number.isNaN(n)); a.length && save({ reminder_offsets: a }); }}>ثبت</button></div></Field>
+    <Field label="هدف هفتگی (ستاره)"><input type="number" min={0} className="input" defaultValue={kid.weekly_goal_stars} onBlur={(e) => +e.target.value !== kid.weekly_goal_stars && save({ weekly_goal_stars: +e.target.value })} /></Field>
+    <div className="flex gap-2 flex-wrap"><button className="btn btn-ghost" onClick={() => act(async () => { await api('/notifications/test', { body: { user_id: kid.id } }); await hist.reload(); }, 'اعلان آزمایشی ارسال شد (تا ۳۰ ثانیه)')}>ارسال اعلان آزمایشی</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">رمز عبور {kid.display_name}</h2><div className="flex gap-2"><input type="text" className="input" dir="ltr" placeholder="رمز جدید (حداقل ۸ نویسه)" value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn" disabled={pw.length < 8} onClick={() => act(async () => { await api(`/children/${kid.id}/password`, { body: { password: pw } }); setPw(''); }, 'رمز تغییر کرد و نشست‌ها بسته شد')}>تغییر</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">تاریخچه‌ی اعلان‌ها</h2>{!hist.data?.length && <Empty>اعلانی ارسال نشده.</Empty>}
+      {hist.data?.map((n) => <div key={n.id} className="text-sm py-1 border-b border-slate-100 last:border-0">{n.icon} <b>{n.title}</b> — {instantFa(n.due_at)} · {n.done_at ? '✅ انجام شد' : n.completion === 'approved' ? '✅ تأیید شده' : n.completion === 'pending' ? '🕓 منتظر تأیید' : n.seen_at ? '👁 دیده شد' : '— بی‌پاسخ'}{n.snoozed_count ? ` · ${fa(n.snoozed_count)} بار تعویق` : ''} <span className="text-xs text-slate-400">[{n.push_status ?? 'در صف'}]</span></div>)}</section></div>;
+}

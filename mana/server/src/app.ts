@@ -17,7 +17,7 @@ import aiRoutes from './routes/ai.ts';
 
 export async function buildApp() {
   const app = Fastify({ logger: config.prod ? { level: 'info' } : { level: 'warn' }, bodyLimit: 1_000_000, trustProxy: config.prod });
-  await app.register(helmet, { contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], connectSrc: ["'self'"], mediaSrc: ["'self'", 'blob:'], workerSrc: ["'self'"] } } });
+  await app.register(helmet, { contentSecurityPolicy: { directives: { upgradeInsecureRequests: config.prod ? [] : null, defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], connectSrc: ["'self'"], mediaSrc: ["'self'", 'blob:'], workerSrc: ["'self'"] } } });
   await app.register(cookie);
   await app.register(rateLimit, { max: 300, timeWindow: '1 minute' });
   await app.register(multipart);
@@ -33,7 +33,7 @@ export async function buildApp() {
 
   const dist = path.resolve(import.meta.dirname, '../../web/dist');
   if (fs.existsSync(dist)) {
-    await app.register(fstatic, { root: dist, wildcard: false });
+    await app.register(fstatic, { root: dist });
     app.setNotFoundHandler((req, reply) => (req.url.startsWith('/api/') ? reply.code(404).send({ error: 'not_found' }) : reply.sendFile('index.html')));
   }
   return app;

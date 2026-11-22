@@ -115,11 +115,13 @@ test('finance flow: transaction, installment payment moves due date', async () =
   await sys(`DELETE FROM debts WHERE id=$1`, [d.id]); await sys(`DELETE FROM transactions WHERE note='پرداخت: t-debt'`);
 });
 test('AI: parses Persian requests and never writes before confirmation', async () => {
+  const cnt = async () => (await sys(`SELECT count(*)::int n FROM events WHERE title='جلسه' AND starts_at > now()`))[0].n;
+  const before = await cnt();
   const r = JSON.parse((await call('t_mom', 'POST', '/api/ai/message', { text: 'فردا ساعت ۱۰ جلسه دارم.' })).body);
-  assert.equal(r.kind, 'proposal'); assert.match(r.summary, /ساعت 10:00/);
-  assert.equal((await sys(`SELECT count(*)::int n FROM events WHERE title='جلسه' AND starts_at > now()`))[0].n, 0);
+  assert.equal(r.kind, 'proposal'); assert.match(r.summary, /ساعت ۱۰:۰۰/);
+  assert.equal(await cnt(), before);             // nothing written before confirmation
   assert.equal((await call('t_mom', 'POST', `/api/ai/proposals/${r.proposal_id}/confirm`, { approve: true })).statusCode, 200);
-  assert.equal((await sys(`SELECT count(*)::int n FROM events WHERE title='جلسه' AND starts_at > now()`))[0].n, 1);
+  assert.equal(await cnt(), before + 1);
   await sys(`DELETE FROM events WHERE title='جلسه'`);
   const e = JSON.parse((await call('t_mom', 'POST', '/api/ai/message', { text: 'امروز ۸۰۰ هزار تومان خرید خانه داشتم.' })).body);
   assert.equal(e.kind, 'proposal');

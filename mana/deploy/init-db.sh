@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+psql -v ON_ERROR_STOP=1 -U postgres <<SQL
+CREATE ROLE mana_owner LOGIN PASSWORD '${OWNER_DB_PASSWORD}';
+CREATE ROLE mana_app LOGIN PASSWORD '${APP_DB_PASSWORD}' NOSUPERUSER NOBYPASSRLS;
+CREATE DATABASE mana OWNER mana_owner;
+SQL
