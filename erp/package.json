@@ -1,0 +1,12 @@
+{
+  "name": "persian-erp-portal",
+  "version": "1.0.0",
+  "description": "پورتال ERP چندشرکتی (Multi-tenant) فارسی - بدون وابستگی خارجی",
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.js",
+    "seed:demo": "node --disable-warning=ExperimentalWarning src/seed.js",
+    "test": "node --disable-warning=ExperimentalWarning test/smoke.mjs"
+  }
+}

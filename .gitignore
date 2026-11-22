@@ -9,3 +9,5 @@ build/mix.wav
 build/music_only.wav
 build/sfx_only.wav
 build/voice_cache/
+erp/data/
+node_modules/
