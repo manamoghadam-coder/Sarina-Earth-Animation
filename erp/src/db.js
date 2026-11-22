@@ -31,6 +31,9 @@ export function migrate(db) {
     CREATE INDEX IF NOT EXISTS ix_gl_acc ON gl_lines(company_id, account_id, date);
     CREATE INDEX IF NOT EXISTS ix_gl_entry ON gl_lines(entry_id);
   `);
+  const glCols = new Set(db.prepare('PRAGMA table_info(gl_lines)').all().map((c) => c.name));
+  if (!glCols.has('party_type')) db.exec('ALTER TABLE gl_lines ADD COLUMN party_type TEXT; ALTER TABLE gl_lines ADD COLUMN party_id INTEGER;');
+  db.exec('CREATE INDEX IF NOT EXISTS ix_gl_party ON gl_lines(company_id, party_type, party_id, date)');
   if (!db.prepare('PRAGMA table_info(companies)').all().some((c) => c.name === 'lock_date')) db.exec('ALTER TABLE companies ADD COLUMN lock_date TEXT');
   for (const def of Object.values(ENTITIES)) {
     const t = 'e_' + def.key;

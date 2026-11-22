@@ -42,7 +42,11 @@ export function seedDemo(db) {
     E.runAction(ctx, ENTITIES.purchase_orders, po.id, 'approve');
     E.runAction(ctx, ENTITIES.purchase_orders, po.id, 'receive');
 
-    const bom = mk('boms', { name: 'قطعه ماشین‌کاری شده A', product_id: i2.id, output_qty: 1, conversion_cost: 500000, lines: [{ item_id: i1.id, qty: 3 }, { item_id: i3.id, qty: 0.5 }] });
+    const wc = mk('work_centers', { name: 'ماشین‌کاری CNC', capacity_hours_day: 16, hourly_rate: 400000 });
+    const m1 = mk('machines', { code: 'M-001', name: 'تراش CNC شماره ۱', work_center_id: wc.id, pm_interval_days: 90, last_pm_date: day(-100) });
+    mk('machines', { code: 'M-002', name: 'پرس هیدرولیک', work_center_id: wc.id, pm_interval_days: 180, last_pm_date: day(-20) });
+    mk('maintenance_orders', { machine_id: m1.id, kind: 'preventive', description: 'سرویس دوره‌ای ۹۰ روزه', planned_date: day(2) });
+    const bom = mk('boms', { name: 'قطعه ماشین‌کاری شده A', product_id: i2.id, output_qty: 1, conversion_cost: 500000, work_center_id: wc.id, hours_per_batch: 0.5, lines: [{ item_id: i1.id, qty: 3 }, { item_id: i3.id, qty: 0.5 }] });
     const wo1 = mk('work_orders', { bom_id: bom.id, qty: 60, warehouse_id: w.id, due_date: day(-5) });
     for (const a of ['release', 'complete']) E.runAction(ctx, ENTITIES.work_orders, wo1.id, a);
     const wo = mk('work_orders', { bom_id: bom.id, qty: 10, warehouse_id: w.id, due_date: day(7) });

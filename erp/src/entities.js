@@ -1,7 +1,8 @@
 import { HttpError, bad, daysBetween } from './util.js';
 import { stockOf, insertMove, applyAvgCost, invKey } from './stock.js';
 import * as ACC from './accounting.js';
-import { completeWorkOrder } from './industry.js';
+import { completeWorkOrder, completeMaintenance, nextPm, plannedHours } from './industry.js';
+import { addDays, today } from './util.js';
 export { stockOf };
 
 export const MODULES = {
@@ -190,7 +191,7 @@ export const ENTITIES = {
           ACC.autoPost(ctx, {
             date: new Date().toISOString().slice(0, 10), description: `دریافت سفارش خرید ${rec.number}`, source: 'purchase_orders', source_ref: rec.id,
             lines: [...Object.entries(byAcc).map(([k, v]) => ({ account_id: ACC.acct(ctx, k), debit: Math.round(v) })),
-              { account_id: ACC.acct(ctx, 'vat_in'), debit: rec.total - rec.subtotal }, { account_id: ACC.acct(ctx, 'ap'), credit: rec.total }],
+              { account_id: ACC.acct(ctx, 'vat_in'), debit: rec.total - rec.subtotal }, { account_id: ACC.acct(ctx, 'ap'), credit: rec.total, supplier_id: rec.supplier_id }],
           });
         },
       },
@@ -258,7 +259,7 @@ export const ENTITIES = {
           }
           ACC.autoPost(ctx, {
             date: rec.date, description: `فاکتور فروش ${rec.number}`, source: 'sales_orders', source_ref: rec.id,
-            lines: [{ account_id: ACC.acct(ctx, 'ar'), debit: rec.total }, { account_id: ACC.acct(ctx, 'sales'), credit: rec.subtotal }, { account_id: ACC.acct(ctx, 'vat_out'), credit: rec.total - rec.subtotal },
+            lines: [{ account_id: ACC.acct(ctx, 'ar'), debit: rec.total, customer_id: rec.customer_id }, { account_id: ACC.acct(ctx, 'sales'), credit: rec.subtotal }, { account_id: ACC.acct(ctx, 'vat_out'), credit: rec.total - rec.subtotal },
               { account_id: ACC.acct(ctx, 'cogs'), debit: Math.round(cogsTotal) }, ...Object.entries(cogs).map(([k, v]) => ({ account_id: ACC.acct(ctx, k), credit: Math.round(v) }))],
           });
         },
@@ -291,8 +292,8 @@ export const ENTITIES = {
       if (!cash) return;
       const recv = rec.kind === 'receipt';
       ACC.autoPost(ctx, { date: rec.date, description: `${recv ? 'دریافت' : 'پرداخت'} ${rec.number}`, source: 'payments', source_ref: rec.id,
-        lines: recv ? [{ account_id: cash, debit: rec.amount }, { account_id: ACC.acct(ctx, 'ar'), credit: rec.amount }]
-          : [{ account_id: ACC.acct(ctx, 'ap'), debit: rec.amount }, { account_id: cash, credit: rec.amount }] });
+        lines: recv ? [{ account_id: cash, debit: rec.amount }, { account_id: ACC.acct(ctx, 'ar'), credit: rec.amount, customer_id: rec.customer_id }]
+          : [{ account_id: ACC.acct(ctx, 'ap'), debit: rec.amount, supplier_id: rec.supplier_id }, { account_id: cash, credit: rec.amount }] });
     },
     afterDelete(ctx, rec) { ACC.reverseBySource(ctx, 'payments', rec.id); },
   },
@@ -300,7 +301,7 @@ export const ENTITIES = {
     module: 'finance', title: 'هزینه‌ها', singular: 'هزینه', label: ['description'], sortDefault: 'date', search: ['description', 'paid_to'],
     fields: [
       dateField('date', 'تاریخ', { required: true, list: true, default: '$today' }),
-      { k: 'category', label: 'دسته', type: 'select', required: true, list: true, filter: true, options: S(['salary', 'حقوق و دستمزد'], ['rent', 'اجاره'], ['utilities', 'آب/برق/گاز/اینترنت'], ['transport', 'حمل و نقل'], ['marketing', 'تبلیغات'], ['supplies', 'ملزومات'], ['other', 'سایر']) },
+      { k: 'category', label: 'دسته', type: 'select', required: true, list: true, filter: true, options: S(['salary', 'حقوق و دستمزد'], ['rent', 'اجاره'], ['utilities', 'آب/برق/گاز/اینترنت'], ['transport', 'حمل و نقل'], ['marketing', 'تبلیغات'], ['supplies', 'ملزومات'], ['maintenance', 'تعمیر و نگهداری'], ['other', 'سایر']) },
       { k: 'description', label: 'شرح', type: 'text', required: true, list: true },
       { k: 'amount', label: 'مبلغ', type: 'money', required: true, min: 1, list: true },
       { k: 'paid_to', label: 'پرداخت به', type: 'text', list: true },
@@ -415,9 +416,9 @@ export const ENTITIES = {
       dateField('date', 'تاریخ', { required: true, list: true, default: '$today' }),
       { k: 'description', label: 'شرح', type: 'text', required: true, list: true },
       { k: 'status', label: 'وضعیت', type: 'select', readonly: true, default: 'draft', list: true, filter: true, options: S(['draft', 'پیش‌نویس', 'mute'], ['posted', 'قطعی', 'ok'], ['reversed', 'برگشت‌خورده', 'bad']) },
-      { k: 'source', label: 'منشأ', type: 'select', readonly: true, default: 'manual', list: true, options: S(['manual', 'دستی'], ['sales_orders', 'فروش'], ['purchase_orders', 'خرید'], ['payments', 'دریافت/پرداخت'], ['expenses', 'هزینه'], ['work_orders', 'تولید'], ['reversal', 'برگشت']) },
+      { k: 'source', label: 'منشأ', type: 'select', readonly: true, default: 'manual', list: true, options: S(['manual', 'دستی'], ['sales_orders', 'فروش'], ['purchase_orders', 'خرید'], ['payments', 'دریافت/پرداخت'], ['expenses', 'هزینه'], ['work_orders', 'تولید'], ['maintenance_orders', 'نگهداری'], ['closing', 'بستن سال'], ['reversal', 'برگشت']) },
       { k: 'source_ref', label: 'ارجاع منشأ', type: 'text', readonly: true },
-      { k: 'lines', label: 'ردیف‌های سند', type: 'lines', cols: [{ k: 'account_id', label: 'حساب', type: 'ref', ref: 'accounts' }, { k: 'debit', label: 'بدهکار', type: 'number' }, { k: 'credit', label: 'بستانکار', type: 'number' }, { k: 'memo', label: 'شرح', type: 'text' }] },
+      { k: 'lines', label: 'ردیف‌های سند', type: 'lines', cols: [{ k: 'account_id', label: 'حساب', type: 'ref', ref: 'accounts' }, { k: 'debit', label: 'بدهکار', type: 'number' }, { k: 'credit', label: 'بستانکار', type: 'number' }, { k: 'customer_id', label: 'مشتری (تفصیلی)', type: 'ref', ref: 'customers' }, { k: 'supplier_id', label: 'تأمین‌کننده (تفصیلی)', type: 'ref', ref: 'suppliers' }, { k: 'memo', label: 'شرح', type: 'text' }] },
       { k: 'total', label: 'مبلغ سند', type: 'money', readonly: true, list: true },
     ],
     editWhen: ['draft'],
@@ -432,7 +433,7 @@ export const ENTITIES = {
       {
         key: 'reverse', label: 'برگشت سند', from: ['posted'], to: 'reversed', style: 'bad', confirm: 'یک سند برگشتی ثبت و این سند برگشت‌خورده می‌شود. ادامه؟',
         run(ctx, rec) {
-          if (rec.source !== 'manual') throw new HttpError(409, 'سند خودکار را از طریق سند مبدأ (فروش/خرید/دریافت/…) اصلاح کنید');
+          if (!['manual', 'closing'].includes(rec.source)) throw new HttpError(409, 'سند خودکار را از طریق سند مبدأ (فروش/خرید/دریافت/…) اصلاح کنید');
           ACC.reverseEntry(ctx, rec);
         },
       },
@@ -448,7 +449,10 @@ export const ENTITIES = {
       { k: 'product_id', label: 'محصول نهایی', type: 'ref', ref: 'items', required: true, list: true },
       { k: 'version', label: 'نسخه', type: 'text', default: '1', list: true },
       { k: 'output_qty', label: 'تعداد محصول در هر بچ', type: 'number', required: true, min: 0.0001, default: 1, list: true },
-      { k: 'conversion_cost', label: 'دستمزد و سربار هر بچ', type: 'money', min: 0, default: 0, list: true },
+      { k: 'conversion_cost', label: 'دستمزد و سربار ثابت هر بچ', type: 'money', min: 0, default: 0, list: true },
+      { k: 'work_center_id', label: 'مرکز کار', type: 'ref', ref: 'work_centers' },
+      { k: 'hours_per_batch', label: 'ساعت کار هر بچ', type: 'number', min: 0, default: 0 },
+      { k: 'scrap_pct', label: 'ضایعات برنامه‌ای (٪) برای MRP', type: 'number', min: 0, max: 100, default: 0 },
       { k: 'status', label: 'وضعیت', type: 'select', options: ACTIVE, default: 'active', list: true, filter: true },
       { k: 'lines', label: 'مواد مصرفی هر بچ', type: 'lines', cols: ITEM_LINE_COLS(false) },
       { k: 'notes', label: 'توضیحات', type: 'textarea' },
@@ -474,7 +478,12 @@ export const ENTITIES = {
       { k: 'warehouse_id', label: 'انبار (مصرف و تحویل)', type: 'ref', ref: 'warehouses', required: true },
       dateField('start_date', 'شروع'), dateField('due_date', 'سررسید', { list: true }),
       { k: 'status', label: 'وضعیت', type: 'select', readonly: true, default: 'draft', list: true, filter: true, options: S(['draft', 'پیش‌نویس', 'mute'], ['released', 'آزاد شده', 'info'], ['completed', 'تکمیل شده', 'ok'], ['cancelled', 'لغو شده', 'bad']) },
-      { k: 'actual_qty', label: 'تعداد واقعی تولید (خالی = برنامه‌ای)', type: 'number', min: 0.0001 },
+      { k: 'actual_qty', label: 'تعداد سالم تولیدشده (خالی = برنامه‌ای)', type: 'number', min: 0.0001 },
+      { k: 'scrap_qty', label: 'تعداد ضایعات', type: 'number', min: 0, default: 0 },
+      { k: 'run_hours', label: 'ساعت کار واقعی (خالی = برنامه‌ای)', type: 'number', min: 0 },
+      { k: 'planned_hours', label: 'ساعت کار برنامه‌ای', type: 'number', readonly: true },
+      { k: 'yield_pct', label: 'بازده (٪)', type: 'number', readonly: true, list: true },
+      { k: 'scrap_cost', label: 'هزینه‌ی ضایعات', type: 'money', readonly: true },
       { k: 'material_cost', label: 'هزینه مواد', type: 'money', readonly: true },
       { k: 'conversion_cost', label: 'دستمزد و سربار', type: 'money', readonly: true },
       { k: 'unit_cost', label: 'بهای تمام‌شده واحد', type: 'money', readonly: true, list: true },
@@ -485,12 +494,63 @@ export const ENTITIES = {
       if (old && !['draft', 'released'].includes(old.status)) throw new HttpError(409, 'دستور تکمیل/لغوشده قابل ویرایش نیست');
       const b = ctx.db.prepare('SELECT status FROM e_boms WHERE id=? AND company_id=?').get(rec.bom_id, ctx.companyId);
       if (b?.status !== 'active') throw bad('BOM انتخاب‌شده فعال نیست');
+      const bom = ctx.db.prepare('SELECT output_qty, hours_per_batch FROM e_boms WHERE id=?').get(rec.bom_id);
+      rec.planned_hours = plannedHours(bom, rec.qty);
     },
     canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط پیش‌نویس یا لغوشده قابل حذف است'); },
     actions: [
       { key: 'release', label: 'آزادسازی', from: ['draft'], to: 'released', style: 'ok' },
       { key: 'complete', label: 'تکمیل تولید', from: ['released'], to: 'completed', style: 'ok', confirm: 'مواد از انبار خارج و محصول وارد انبار شود؟', run: (ctx, rec) => completeWorkOrder(ctx, rec) },
       { key: 'cancel', label: 'لغو', from: ['draft', 'released'], to: 'cancelled', style: 'bad', confirm: 'دستور لغو شود؟' },
+    ],
+  },
+
+  work_centers: {
+    module: 'production', title: 'مراکز کار', singular: 'مرکز کار', label: ['name'],
+    fields: [
+      { k: 'name', label: 'نام مرکز کار', type: 'text', required: true, unique: true, list: true },
+      { k: 'capacity_hours_day', label: 'ظرفیت (ساعت در روز)', type: 'number', min: 0, default: 8, list: true },
+      { k: 'hourly_rate', label: 'نرخ ساعتی (دستمزد و سربار)', type: 'money', min: 0, default: 0, list: true },
+      { k: 'status', label: 'وضعیت', type: 'select', options: ACTIVE, default: 'active', list: true },
+    ],
+  },
+  machines: {
+    module: 'production', title: 'ماشین‌آلات و تجهیزات', singular: 'ماشین', label: ['code', 'name'], search: ['code', 'name'],
+    fields: [
+      { k: 'code', label: 'کد دارایی', type: 'text', required: true, unique: true, list: true },
+      { k: 'name', label: 'نام ماشین', type: 'text', required: true, list: true },
+      { k: 'work_center_id', label: 'مرکز کار', type: 'ref', ref: 'work_centers', list: true },
+      { k: 'status', label: 'وضعیت', type: 'select', default: 'operational', list: true, filter: true, options: S(['operational', 'در سرویس', 'ok'], ['maintenance', 'در حال تعمیر', 'warn'], ['down', 'خراب', 'bad'], ['retired', 'خارج از رده', 'mute']) },
+      { k: 'pm_interval_days', label: 'دوره‌ی PM (روز)', type: 'number', min: 1 },
+      dateField('last_pm_date', 'آخرین PM'),
+      { k: 'next_pm_date', label: 'PM بعدی', type: 'date', readonly: true, list: true },
+      { k: 'notes', label: 'توضیحات', type: 'textarea' },
+    ],
+    validate(ctx, rec) { rec.next_pm_date = nextPm(rec); },
+  },
+  maintenance_orders: {
+    module: 'production', title: 'دستورکار نگهداری و تعمیرات', singular: 'دستورکار', label: ['number'], numbering: 'MO', sortDefault: 'id', search: ['number', 'description'],
+    fields: [
+      { k: 'number', label: 'شماره', type: 'text', readonly: true, list: true },
+      { k: 'machine_id', label: 'ماشین', type: 'ref', ref: 'machines', required: true, list: true },
+      { k: 'kind', label: 'نوع', type: 'select', required: true, default: 'preventive', list: true, filter: true, options: S(['preventive', 'پیشگیرانه (PM)', 'info'], ['corrective', 'اصلاحی (خرابی)', 'bad']) },
+      { k: 'description', label: 'شرح کار', type: 'text', required: true, list: true },
+      dateField('planned_date', 'تاریخ برنامه', { list: true, default: '$today' }),
+      { k: 'status', label: 'وضعیت', type: 'select', readonly: true, default: 'open', list: true, filter: true, options: S(['open', 'باز', 'warn'], ['in_progress', 'در حال انجام', 'info'], ['done', 'انجام شده', 'ok'], ['cancelled', 'لغو شده', 'bad']) },
+      { k: 'downtime_hours', label: 'ساعت توقف', type: 'number', min: 0, default: 0 },
+      { k: 'cost', label: 'هزینه (قطعات و خدمات)', type: 'money', min: 0, default: 0 },
+      { k: 'completed_date', label: 'تاریخ انجام', type: 'date', readonly: true },
+    ],
+    editWhen: ['open', 'in_progress'],
+    validate(ctx, rec, old) { if (old && !['open', 'in_progress'].includes(old.status)) throw new HttpError(409, 'دستورکار پایان‌یافته/لغوشده قابل ویرایش نیست'); },
+    afterSave(ctx, rec, old) {
+      if (!old && rec.kind === 'corrective') ctx.db.prepare(`UPDATE e_machines SET status='down' WHERE id=? AND company_id=? AND status!='retired'`).run(rec.machine_id, ctx.companyId);
+    },
+    canDelete(rec) { if (rec.status === 'done') throw new HttpError(409, 'دستورکار انجام‌شده قابل حذف نیست'); },
+    actions: [
+      { key: 'start', label: 'شروع کار', from: ['open'], to: 'in_progress', style: 'ok' },
+      { key: 'complete', label: 'پایان کار', from: ['open', 'in_progress'], to: 'done', style: 'ok', confirm: 'دستورکار پایان یابد؟ (تاریخ PM ماشین و هزینه در حسابداری ثبت می‌شود)', run: (ctx, rec) => completeMaintenance(ctx, rec) },
+      { key: 'cancel', label: 'لغو', from: ['open', 'in_progress'], to: 'cancelled', style: 'bad', confirm: 'دستورکار لغو شود؟' },
     ],
   },
 

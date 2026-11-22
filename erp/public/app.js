@@ -65,7 +65,7 @@ function toast(msg, isErr) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), isErr ? 5000 : 2500);
 }
 async function lookup(key) {
-  if (!state.lookups[key]) state.lookups[key] = await api('GET', `/entities/${key}/lookup`);
+  if (!state.lookups[key]) { try { state.lookups[key] = await api('GET', `/entities/${key}/lookup`); } catch { state.lookups[key] = []; } } // نقش ممکن است به آن ماژول دسترسی نداشته باشد
   return state.lookups[key];
 }
 
@@ -101,8 +101,8 @@ function shell(inner, active) {
     nav.push(`<div class="grp">${m.icon} ${esc(m.title)}</div>`);
     for (const k of m.entities) nav.push(`<a href="#/e/${k}" class="${active === k ? 'on' : ''}">${esc(me.meta[k].title)}</a>`);
     if (m.key === 'inventory') nav.push(`<a href="#/report/stock" class="${active === 'report:stock' ? 'on' : ''}">گزارش موجودی</a>`);
-    if (m.key === 'accounting') for (const [r, l] of [['trial', 'تراز آزمایشی'], ['ledger', 'دفتر کل (معین)'], ['income', 'صورت سود و زیان'], ['balance', 'ترازنامه']]) nav.push(`<a href="#/report/${r}" class="${active === 'report:' + r ? 'on' : ''}">${l}</a>`);
-    if (m.key === 'production') nav.push(`<a href="#/report/mrp" class="${active === 'report:mrp' ? 'on' : ''}">نیازمندی مواد (MRP)</a>`);
+    if (m.key === 'accounting') for (const [r, l] of [['trial', 'تراز آزمایشی'], ['ledger', 'دفتر کل (معین)'], ['party?type=customer', 'کارت حساب مشتریان'], ['party?type=supplier', 'کارت حساب تأمین‌کنندگان'], ['income', 'صورت سود و زیان'], ['balance', 'ترازنامه']]) nav.push(`<a href="#/report/${r}" class="${active === 'report:' + r.split('?')[0] ? 'on' : ''}">${l}</a>`);
+    if (m.key === 'production') nav.push(`<a href="#/report/mrp" class="${active === 'report:mrp' ? 'on' : ''}">نیازمندی مواد (MRP)</a><a href="#/report/capacity" class="${active === 'report:capacity' ? 'on' : ''}">ظرفیت مراکز کار</a><a href="#/report/pm" class="${active === 'report:pm' ? 'on' : ''}">برنامه‌ی نگهداری (PM)</a>`);
     if (m.key === 'finance') nav.push(`<a href="#/report/balances" class="${active === 'report:balances' ? 'on' : ''}">مانده حساب‌ها</a>`);
   }
   const adm = me.modules.find((m) => m.key === 'admin');
@@ -330,19 +330,22 @@ async function openForm(meta, rec, done) {
 }
 
 // ─── گزارش‌ها ───
-const REPORT_TITLES = { trial: 'تراز آزمایشی', ledger: 'دفتر کل (حساب معین)', income: 'صورت سود و زیان', balance: 'ترازنامه', mrp: 'نیازمندی مواد (MRP)' };
+const REPORT_TITLES = { trial: 'تراز آزمایشی', ledger: 'دفتر کل (حساب معین)', income: 'صورت سود و زیان', balance: 'ترازنامه', mrp: 'نیازمندی مواد (MRP)', party: 'کارت حساب تفصیلی', capacity: 'ظرفیت مراکز کار', pm: 'برنامه‌ی نگهداری و تعمیرات (PM)' };
 async function pageAccReport(name) {
   const cur = state.me.company.currency;
   const q = new URLSearchParams(location.hash.split('?')[1] || '');
   const accounts = name === 'ledger' ? await lookup('accounts') : [];
   const range = name !== 'balance';
+  const ptype = q.get('type') === 'supplier' ? 'supplier' : 'customer';
+  const partyList = name === 'party' ? await lookup(ptype === 'supplier' ? 'suppliers' : 'customers') : [];
   const dv = (k) => (q.get(k) ? toFa(isoToJ(q.get(k))) : '');
-  const bar = `<form class="toolbar" id="rf">${name === 'ledger' ? `<select id="ra" style="min-width:240px"><option value="">— انتخاب حساب —</option>${accounts.map((a) => `<option value="${a.id}" ${q.get('account') === String(a.id) ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>` : ''}
+  const bar = `<form class="toolbar" id="rf">${name === 'party' ? `<select id="rt"><option value="customer" ${ptype === 'customer' ? 'selected' : ''}>مشتریان</option><option value="supplier" ${ptype === 'supplier' ? 'selected' : ''}>تأمین‌کنندگان</option></select><select id="rp" style="min-width:200px"><option value="">— همه (خلاصه) —</option>${partyList.map((a) => `<option value="${a.id}" ${q.get('party') === String(a.id) ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>` : ''}${name === 'ledger' ? `<select id="ra" style="min-width:240px"><option value="">— انتخاب حساب —</option>${accounts.map((a) => `<option value="${a.id}" ${q.get('account') === String(a.id) ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>` : ''}
     ${range ? `<label class="hint">از</label><input id="rfrom" placeholder="۱۴۰۵/۰۱/۰۱" dir="ltr" style="width:130px" value="${dv('from')}">` : ''}
     <label class="hint">${range ? 'تا' : 'تا تاریخ'}</label><input id="rto" placeholder="${toFa(isoToJ(new Date().toISOString().slice(0, 10)))}" dir="ltr" style="width:130px" value="${dv('to')}">
     <button class="btn pri">نمایش</button><span class="sp"></span><button type="button" class="btn" id="pr">🖨 چاپ</button></form><div id="rerr"></div>`;
   let body = '';
   const ready = name !== 'ledger' || q.get('account');
+  if (name === 'party') q.set('type', ptype);
   if (ready) {
     const d = await api('GET', `/reports/${name}?${q}`);
     const row = (cells, cls = '') => `<tr class="${cls}">${cells.map((c, i) => `<td class="${i ? 'num' : ''}">${c}</td>`).join('')}</tr>`;
@@ -356,6 +359,17 @@ async function pageAccReport(name) {
         `<tr><td colspan="5"><b>مانده ابتدای دوره</b></td><td class="num"><b>${fmt(d.opening)}</b></td></tr>`,
         ...d.rows.map((r) => `<tr><td>${showDate(r.date)}</td><td>${esc(r.number)}</td><td>${esc(r.memo || r.description)}</td><td class="num">${r.debit ? fmt(r.debit) : ''}</td><td class="num">${r.credit ? fmt(r.credit) : ''}</td><td class="num">${fmt(r.balance)}</td></tr>`),
         `<tr><td colspan="5"><b>مانده پایان</b></td><td class="num"><b>${fmt(d.closing)}</b></td></tr>`]);
+    } else if (name === 'party') {
+      if (!q.get('party')) {
+        body = tbl(['نام', `مانده (${ptype === 'customer' ? 'بدهکار = مطالبات' : 'بستانکار = بدهی'})`], [...d.parties.map((r) => `<tr><td><a href="#/report/party?type=${d.type}&party=${r.id}">${esc(r.name)}</a></td><td class="num">${fmt(r.balance)}</td></tr>`),
+          `<tr><td><b>جمع حساب‌های تفصیلی</b></td><td class="num"><b>${fmt(d.total)}</b></td></tr><tr><td>مانده‌ی حساب کل (${d.type === 'customer' ? 'دریافتنی' : 'پرداختنی'})</td><td class="num">${fmt(d.control)}</td></tr>`]);
+        body += `<p class="hint">${d.unassigned === 0 ? '✔ جمع تفصیلی با حساب کل برابر است.' : `⚠ ${fmt(d.unassigned)} از مانده‌ی حساب کل به طرف‌حساب نسبت داده نشده (سند دستی بدون تفصیلی).`}</p>`;
+      } else {
+        body = `<h2>${esc(d.party.name)}</h2>` + tbl(['تاریخ', 'سند', 'شرح', 'بدهکار', 'بستانکار', 'مانده'], [
+          `<tr><td colspan="5"><b>مانده ابتدای دوره</b></td><td class="num"><b>${fmt(d.opening)}</b></td></tr>`,
+          ...d.rows.map((r) => `<tr><td>${showDate(r.date)}</td><td>${esc(r.number)}</td><td>${esc(r.description)}</td><td class="num">${r.debit ? fmt(r.debit) : ''}</td><td class="num">${r.credit ? fmt(r.credit) : ''}</td><td class="num">${fmt(r.balance)}</td></tr>`),
+          `<tr><td colspan="5"><b>مانده پایان</b></td><td class="num"><b>${fmt(d.closing)}</b></td></tr>`]);
+      }
     } else if (name === 'income') {
       const sec = (title, list, total) => `<tr><td colspan="2"><b>${title}</b></td></tr>${list.map((a) => row([`&nbsp;&nbsp;${esc(a.code)} ${esc(a.name)}`, fmt(a.amount)])).join('')}${row([`<b>جمع ${title}</b>`, `<b>${fmt(total)}</b>`])}`;
       body = `<div class="tablewrap"><table><tbody>${sec('درآمدها', d.revenue, d.totalRevenue)}${sec('هزینه‌ها', d.expenses, d.totalExpenses)}
@@ -369,6 +383,7 @@ async function pageAccReport(name) {
   } else body = '<div class="empty">یک حساب را انتخاب و «نمایش» را بزنید.</div>';
   shell(`<h1>${REPORT_TITLES[name]}</h1><div class="sub">مبالغ به ${esc(cur)}</div>${bar}${body}`, 'report:' + name);
   document.getElementById('pr').onclick = () => print();
+  const rtEl = document.getElementById('rt'); if (rtEl) rtEl.onchange = () => { location.hash = `#/report/party?type=${rtEl.value}`; };
   document.getElementById('rf').onsubmit = (e) => {
     e.preventDefault();
     const p = new URLSearchParams();
@@ -378,6 +393,7 @@ async function pageAccReport(name) {
       p.set(k, iso);
     }
     const a = document.getElementById('ra'); if (a?.value) p.set('account', a.value);
+    const rt = document.getElementById('rt'); if (rt) { p.set('type', rt.value); const pp = document.getElementById('rp'); if (pp.value && rt.value === ptype) p.set('party', pp.value); }
     location.hash = `#/report/${name}?${p}`;
   };
 }
@@ -388,8 +404,26 @@ async function pageMrp() {
   shell(`<h1>نیازمندی مواد (MRP)</h1><div class="sub">بر اساس ${fmt(d.workOrders)} دستور تولید باز (پیش‌نویس/آزادشده) در برابر موجودی و سفارش‌های خرید تأییدشده</div>
     <div class="tablewrap"><table><thead><tr><th>کد</th><th>ماده</th><th>نیاز</th><th>موجودی</th><th>در راه (خرید)</th><th>کسری</th><th>وضعیت</th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="empty">دستور تولید بازی وجود ندارد</td></tr>'}</tbody></table></div>`, 'report:mrp');
 }
+async function pageCapacity() {
+  const d = await api('GET', '/reports/capacity');
+  shell(`<h1>ظرفیت مراکز کار</h1><div class="sub">بار ساعتی دستورهای تولید باز (پیش‌نویس/آزاد) در برابر ظرفیت روزانه</div><div class="tablewrap"><table><thead><tr><th>مرکز کار</th><th>ظرفیت (ساعت/روز)</th><th>دستورهای باز</th><th>بار (ساعت)</th><th>روز کاری لازم</th><th>نزدیک‌ترین سررسید</th></tr></thead><tbody>
+    ${d.rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="num">${fmt(r.cap)}</td><td class="num">${fmt(r.orders)}</td><td class="num">${fmt(r.hours)}</td><td class="num"><b>${r.days === null ? '—' : fmt(r.days)}</b></td><td>${showDate(r.earliest)}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">مرکز کاری تعریف نشده</td></tr>'}</tbody></table></div>`, 'report:capacity');
+}
+async function pagePm() {
+  const d = await api('GET', '/reports/pm');
+  const st = { overdue: ['bad', 'عقب‌افتاده'], soon: ['warn', 'نزدیک (≤۷ روز)'], ok: ['ok', 'در برنامه'], none: ['', 'بدون برنامه'] };
+  const canCreate = (state.me.perms.production || '').includes('c');
+  shell(`<h1>برنامه‌ی نگهداری پیشگیرانه (PM)</h1><div class="toolbar"><span class="sub" style="margin:0">ماشین‌هایی که PM آن‌ها عقب‌افتاده یا ≤۷ روز مانده است، دستورکار می‌گیرند.</span><span class="sp"></span>${canCreate ? '<button class="btn pri" id="gen">⚙ ساخت دستورکار PM برای موارد سررسیده</button>' : ''}</div>
+    <div class="tablewrap"><table><thead><tr><th>ماشین</th><th>وضعیت ماشین</th><th>آخرین PM</th><th>PM بعدی</th><th>روز مانده</th><th>وضعیت برنامه</th><th>دستورکار باز</th><th>توقف ۹۰ روز (ساعت)</th></tr></thead><tbody>
+    ${d.rows.map((r) => `<tr><td>${esc(r.code)} · ${esc(r.name)}</td><td>${badge(state.me.meta.machines.fields.find((f) => f.k === 'status'), r.status)}</td><td>${showDate(r.last_pm_date)}</td><td>${showDate(r.next_pm_date)}</td><td class="num">${r.days_left === null ? '—' : fmt(r.days_left)}</td>
+      <td><span class="badge ${st[r.pm_state][0]}">${st[r.pm_state][1]}</span></td><td class="num">${fmt(r.open_orders)}</td><td class="num">${fmt(r.downtime90)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">ماشینی ثبت نشده</td></tr>'}</tbody></table></div>`, 'report:pm');
+  const g = document.getElementById('gen');
+  if (g) g.onclick = async () => { try { const r = await api('POST', '/maintenance/generate', {}); toast(`${fmt(r.created)} دستورکار ساخته شد`); pagePm(); } catch (e) { toast(e.message, true); } };
+}
 async function pageReport(name) {
   if (name === 'mrp') return pageMrp();
+  if (name === 'capacity') return pageCapacity();
+  if (name === 'pm') return pagePm();
   if (REPORT_TITLES[name]) return pageAccReport(name);
   const d = await api('GET', `/reports/${name}`);
   const cur = state.me.company.currency;
@@ -443,7 +477,17 @@ async function pageSettings() {
   const c = state.me.company;
   shell(`<h1>تنظیمات شرکت</h1><form class="card form" id="sf" style="max-width:600px"><div><label>نام شرکت</label><input id="n" value="${esc(c.name)}"></div><div><label>واحد پول</label><input id="c" value="${esc(c.currency)}"></div>
     <div class="full"><label>بستن دوره‌ی مالی تا تاریخ (ثبت سند در این تاریخ و قبل از آن ممنوع می‌شود؛ خالی = باز)</label><input id="lk" dir="ltr" placeholder="۱۴۰۴/۱۲/۲۹" value="${esc(c.lock_date ? toFa(isoToJ(c.lock_date)) : '')}"></div>
-    <div class="full"><button class="btn pri">ذخیره</button></div></form>`, 'settings');
+    <div class="full"><button class="btn pri">ذخیره</button></div></form>
+    ${state.me.modules.some((m) => m.key === 'accounting') && (state.me.perms.accounting || '').includes('e') ? `<div class="card" style="max-width:600px;margin-top:16px"><h2>بستن سال مالی</h2>
+      <p class="hint">حساب‌های درآمد و هزینه تا تاریخ انتخابی صفر و سود/زیان به «سود (زیان) انباشته» منتقل می‌شود و دوره تا آن تاریخ قفل می‌گردد. اسناد پیش‌نویس باید قبلاً قطعی یا حذف شده باشند.</p>
+      <div class="toolbar"><input id="cy" dir="ltr" placeholder="۱۴۰۴/۱۲/۲۹" style="width:150px"><button class="btn bad" id="cyb">بستن سال مالی</button></div></div>` : ''}`, 'settings');
+  const cyb = document.getElementById('cyb');
+  if (cyb) cyb.onclick = async () => {
+    const iso = jToIso(document.getElementById('cy').value);
+    if (!iso) return toast('تاریخ شمسی را به شکل ۱۴۰۴/۱۲/۲۹ وارد کنید', true);
+    if (!confirm(`سال مالی تا ${toFa(isoToJ(iso))} بسته شود؟ پس از آن ثبت سند در این بازه ممکن نیست (برای بازگشایی: برداشتن قفل و برگشت سند بستن).`)) return;
+    try { const r = await api('POST', '/accounting/close-year', { date: iso }); state.me = await api('GET', '/me'); toast(`سال بسته شد — ${r.net >= 0 ? 'سود' : 'زیان'} دوره: ${fmt(Math.abs(r.net))}`); pageSettings(); } catch (e) { toast(e.message, true); }
+  };
   document.getElementById('sf').onsubmit = async (e) => {
     e.preventDefault();
     try {

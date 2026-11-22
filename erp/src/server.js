@@ -9,7 +9,7 @@ import { initSecret, signToken, readToken, verifyPassword, hashPassword, can, RO
 import * as engine from './engine.js';
 import { HttpError, bad, isoDate } from './util.js';
 import * as ACC from './accounting.js';
-import { mrp } from './industry.js';
+import { mrp, capacity, pmRows, pmDue } from './industry.js';
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dir, '..', 'public');
@@ -133,6 +133,15 @@ export function createApp({ dataDir, quiet } = {}) {
       if (id && !sub && method === 'DELETE') { need(ctx, def, 'd'); return json(res, 200, tx(db, () => engine.remove(ctx, def, id))); }
       if (id && sub === 'actions' && route[4] && method === 'POST') { need(ctx, def, 'e'); return json(res, 200, tx(db, () => engine.runAction(ctx, def, id, route[4]))); }
     }
+    if (route[0] === 'accounting' && route[1] === 'close-year' && method === 'POST') {
+      if (!moduleOn(ctx, 'accounting') || !can(user.role, 'accounting', 'c') || !can(user.role, 'accounting', 'e')) throw new HttpError(403, 'دسترسی ندارید');
+      return json(res, 200, tx(db, () => { const r = ACC.closeYear(ctx, body.date); engine.audit(ctx, 'accounting', null, 'close-year', body.date); return r; }));
+    }
+    if (route[0] === 'maintenance' && route[1] === 'generate' && method === 'POST') {
+      if (!moduleOn(ctx, 'production') || !can(user.role, 'production', 'c')) throw new HttpError(403, 'دسترسی ندارید');
+      const made = tx(db, () => pmDue(ctx).map((m) => engine.create(ctx, ENTITIES.maintenance_orders, { machine_id: m.id, kind: 'preventive', description: `سرویس دوره‌ای ${m.name}`, planned_date: m.next_pm_date })));
+      return json(res, 200, { created: made.length });
+    }
     if (route[0] === 'export' && route[1] && method === 'GET') {
       const def = ENTITIES[route[1]];
       if (!def || def.key === 'users') throw new HttpError(404, 'یافت نشد');
@@ -214,6 +223,7 @@ export function createApp({ dataDir, quiet } = {}) {
       const y = new Date().getFullYear() + '-01-01';
       add('net', 'سود (زیان) خالص از ابتدای سال میلادی', ACC.incomeStatement(ctx, { from: y }).netIncome, { money: true, link: 'report:income' });
     }
+    if (has('production')) { const pm = pmRows(ctx).filter((r) => r.pm_state === 'overdue' || r.pm_state === 'soon').length; add('pm', 'ماشین‌های نیازمند PM (≤۷ روز)', pm, { link: 'report:pm', warn: pm > 0 }); }
     if (has('production')) add('wo', 'دستورهای تولید باز', one(`SELECT COUNT(*) n FROM e_work_orders WHERE company_id=? AND status IN ('draft','released')`).n, { link: 'work_orders' });
     if (has('projects')) {
       add('prj', 'پروژه‌های در حال اجرا', one(`SELECT COUNT(*) n FROM e_projects WHERE company_id=? AND status='active'`).n, { link: 'projects' });
@@ -230,14 +240,14 @@ export function createApp({ dataDir, quiet } = {}) {
 
   function report(ctx, name, internal, params = {}) {
     const c = ctx.companyId, u = ctx.user;
-    const acctRep = { trial: ACC.trialBalance, ledger: ACC.ledger, income: ACC.incomeStatement, balance: ACC.balanceSheet };
+    const acctRep = { trial: ACC.trialBalance, ledger: ACC.ledger, income: ACC.incomeStatement, balance: ACC.balanceSheet, party: ACC.partyReport };
     if (acctRep[name]) {
       if (!(moduleOn(ctx, 'accounting') && can(u.role, 'accounting', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
       return acctRep[name](ctx, params);
     }
-    if (name === 'mrp') {
+    if (['mrp', 'capacity', 'pm'].includes(name)) {
       if (!(moduleOn(ctx, 'production') && can(u.role, 'production', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
-      return mrp(ctx);
+      return name === 'mrp' ? mrp(ctx) : name === 'capacity' ? capacity(ctx) : { rows: pmRows(ctx) };
     }
     if (name === 'stock') {
       if (!internal && !(moduleOn(ctx, 'inventory') && can(u.role, 'inventory', 'v'))) throw new HttpError(403, 'دسترسی ندارید');
