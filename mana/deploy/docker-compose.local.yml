@@ -1,0 +1,19 @@
+# اجرای آزمایشی روی لپ‌تاپ (بدون HTTPS و بدون دامنه). فقط برای خودتان روی localhost؛ رمزهای زیر محلی‌اند و برای سرور واقعی استفاده نشوند.
+# UNTESTED in the build environment (no Docker there).
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_PASSWORD: local_admin, OWNER_DB_PASSWORD: local_owner, APP_DB_PASSWORD: local_app }
+    volumes: [ "pgdata:/var/lib/postgresql/data", "./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro" ]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 20 }
+  mana:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    depends_on: { db: { condition: service_healthy } }
+    ports: [ "127.0.0.1:8080:8080" ]      # فقط از همین لپ‌تاپ قابل دسترسی
+    volumes: [ "photos:/app/server/storage" ]
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://mana_app:local_app@db:5432/mana
+      DATABASE_URL_OWNER: postgres://mana_owner:local_owner@db:5432/mana
+      STORAGE_DIR: /app/server/storage
+volumes: { pgdata: {}, photos: {} }
