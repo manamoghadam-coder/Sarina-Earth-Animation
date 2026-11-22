@@ -59,7 +59,7 @@ export function BarChart({ rows, fmt }: { rows: { label: string; value: number; 
   const max = Math.max(1, ...rows.map((r) => Math.max(r.value, r.budget ?? 0)));
   return <div className="space-y-2" role="img" aria-label="نمودار هزینه‌ها بر اساس دسته">{rows.map((r) => <div key={r.label}>
     <div className="flex justify-between text-sm"><span>{r.label}</span><span className={r.budget != null && r.value > r.budget ? 'text-red-600 font-bold' : ''}>{fmt(r.value)}{r.budget != null ? ` از ${fmt(r.budget)}` : ''}</span></div>
-    <div className="h-3 rounded-full bg-slate-100 relative overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.value / max) * 100}%`, background: r.budget != null && r.value > r.budget ? '#dc2626' : '#14b8a6' }} />
+    <div className="h-3 rounded-full bg-slate-100 relative overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.value / max) * 100}%`, background: r.budget != null && r.value > r.budget ? '#dc2626' : '#8b5cf6' }} />
       {r.budget != null && <div className="absolute top-0 h-full w-0.5 bg-navy-800" style={{ insetInlineStart: `${(r.budget / max) * 100}%` }} />}</div></div>)}</div>;
 }
 export function Confirm({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {

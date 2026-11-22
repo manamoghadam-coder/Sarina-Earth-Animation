@@ -5,19 +5,20 @@
 
 @theme {
   --font-sans: "Vazirmatn", system-ui, sans-serif;
-  --color-navy-900: #0f2142; --color-navy-800: #12274a; --color-navy-700: #1c3866;
-  --color-teal-mana: #14b8a6; --color-teal-soft: #ccfbf1;
+  --color-navy-900: #2e1862; --color-navy-800: #3b1f78; --color-navy-700: #52308f;
+  --color-teal-mana: #8b5cf6; --color-teal-soft: #ede9fe;
+  --color-teal-50:#f5f3ff;--color-teal-100:#ede9fe;--color-teal-200:#ddd6fe;--color-teal-300:#c4b5fd;--color-teal-500:#8b5cf6;--color-teal-600:#7c3aed;--color-teal-700:#6d28d9;
 }
 html, body, #root { height: 100%; }
-body { font-family: var(--font-sans); background: #f4f7fa; color: #12274a; -webkit-tap-highlight-color: transparent; }
-.card { background: #fff; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 3px rgba(18,39,74,.08); border: 1px solid #e6ecf2; }
+body { font-family: var(--font-sans); background: #f7f4fc; color: #3b1f78; -webkit-tap-highlight-color: transparent; }
+.card { background: #fff; border-radius: 1rem; padding: 1rem; box-shadow: 0 1px 3px rgba(18,39,74,.08); border: 1px solid #e7e0f5; }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; border-radius: .75rem; padding: .55rem 1rem; font-weight: 600; background: var(--color-navy-800); color: #fff; min-height: 44px; }
 .btn:disabled { opacity: .5; }
-.btn-teal { background: var(--color-teal-mana); } .btn-ghost { background: #e8eef5; color: #12274a; } .btn-danger { background: #dc2626; }
+.btn-teal { background: var(--color-teal-mana); } .btn-ghost { background: #efeaf9; color: #3b1f78; } .btn-danger { background: #dc2626; }
 .input { width: 100%; border: 1px solid #cbd5e1; border-radius: .75rem; padding: .55rem .75rem; background: #fff; min-height: 44px; }
 .label { display: block; font-size: .85rem; color: #475569; margin-bottom: .25rem; }
-.chip { display: inline-flex; padding: .15rem .6rem; border-radius: 999px; font-size: .78rem; background: #e8eef5; }
-:focus-visible { outline: 3px solid #14b8a6; outline-offset: 2px; }
+.chip { display: inline-flex; padding: .15rem .6rem; border-radius: 999px; font-size: .78rem; background: #efeaf9; }
+:focus-visible { outline: 3px solid #8b5cf6; outline-offset: 2px; }
 
 /* kids themes */
 .theme-saman { background: linear-gradient(180deg, #fff7d6 0%, #d9f4ff 100%); --k1: #ff7a59; --k2: #ffc83d; --k3: #3bb6f0; --k4: #7ed957; --kd: #4a2c82; color: #3b2a6b; }

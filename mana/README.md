@@ -50,4 +50,6 @@ PW_MANA=… PW_SARINA=… PW_SAMAN=… node mana/e2e/e2e.cjs ./shots
 - [docs/SECURITY.md](docs/SECURITY.md) — مدل تهدید و کنترل‌ها
 - [docs/API.md](docs/API.md) — مستندات API
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md) — راهنمای مدیریت کاربران و استفاده
+- [docs/DEPLOY_PHONES.md](docs/DEPLOY_PHONES.md) — **راهنمای نصب روی سه گوشی**
+- `brand/` — لوگوی BK (SVG + PNG) و اسکریپت رندر
 - [docs/STATUS.md](docs/STATUS.md) — **وضعیت صادقانه‌ی پیاده‌سازی، آزمون‌شده‌ها و محدودیت‌ها**

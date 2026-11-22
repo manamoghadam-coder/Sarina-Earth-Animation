@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="BK">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c4ddb"/><stop offset="1" stop-color="#4a2a9e"/></linearGradient>
+    <linearGradient id="pink" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd1e8"/><stop offset="1" stop-color="#f7a6cf"/></linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#cfe2ff"/><stop offset="1" stop-color="#9bbcff"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#ffffff" stroke-opacity=".12" stroke-width="10"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="36">
+    <!-- B (pastel pink) -->
+    <path d="M128 134 V378 M128 134 H190 C238 134 238 246 190 246 H128 M128 246 H198 C252 246 252 378 198 378 H128" stroke="url(#pink)"/>
+    <!-- K (pastel blue) shares the middle zone with B -->
+    <path d="M300 134 V378 M300 262 L384 134 M330 232 L392 378" stroke="url(#blue)" style="mix-blend-mode:normal"/>
+  </g>
+</svg>

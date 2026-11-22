@@ -17,7 +17,7 @@ export default function ParentApp() {
   const { me, logout } = useAuth(); const go = useNavigate();
   return <div className="min-h-full md:flex">
     <aside className="hidden md:flex md:flex-col w-60 bg-navy-800 text-white p-4 gap-1 sticky top-0 h-screen">
-      <div className="flex items-center gap-2 mb-4"><span className="w-10 h-10 rounded-xl bg-teal-mana grid place-items-center font-extrabold">M</span><div><b>MANA</b><div className="text-xs text-teal-soft">دستیار اجرایی</div></div></div>
+      <div className="flex items-center gap-2 mb-4"><img src="/logo.svg" alt="BK" className="w-10 h-10 rounded-xl" /><div><b>MANA</b><div className="text-xs text-teal-soft">دستیار اجرایی</div></div></div>
       {nav.map(([to, ic, t]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => `rounded-xl px-3 py-2 ${isActive ? 'bg-teal-mana text-white' : 'hover:bg-navy-700'}`}>{ic} {t}</NavLink>)}
       <NavLink to="/ai" className={({ isActive }) => `rounded-xl px-3 py-2 ${isActive ? 'bg-teal-mana' : 'hover:bg-navy-700'}`}>🤖 MANA AI</NavLink>
       <div className="mt-auto flex items-center gap-2"><Avatar id={me!.avatar_photo_id} name={me!.display_name} size={36} /><span className="flex-1">{me!.display_name}</span><button className="text-sm underline" onClick={logout}>خروج</button></div>
