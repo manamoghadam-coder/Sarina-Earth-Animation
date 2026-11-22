@@ -4,13 +4,17 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/server.js';
-import { openDb, migrate } from '../src/db.js';
 import { seedDemo } from '../src/seed.js';
 
 process.env.ERP_SUPERADMIN_PASSWORD = 'Super-Pass-1';
+if (process.env.TEST_DATABASE_URL) { // اجرای همان تست‌ها روی PostgreSQL: schema تازه
+  const pg = (await import('pg')).default; const c = new pg.Client({ connectionString: process.env.TEST_DATABASE_URL });
+  await c.connect(); await c.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public'); await c.end();
+  console.log('  [PostgreSQL]');
+}
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'erp-test-'));
-const { server, db } = createApp({ dataDir: dir, quiet: true });
-seedDemo(db);
+const { server, db } = await createApp({ dataDir: dir, quiet: true, databaseUrl: process.env.TEST_DATABASE_URL || '' });
+await seedDemo(db);
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
@@ -330,5 +334,5 @@ await t('بازگشایی: برگشت سند بستن پس از برداشتن �
 });
 
 console.log(`\n${passed} تست موفق`);
-server.close(); db.close();
+server.close(); await db.close();
 fs.rmSync(dir, { recursive: true, force: true });

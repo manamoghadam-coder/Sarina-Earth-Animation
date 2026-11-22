@@ -5,18 +5,17 @@ import { hashPassword } from './auth.js';
 const q = (s) => `"${s}"`;
 const table = (def) => 'e_' + def.key;
 
-export function audit(ctx, entity, recId, action, detail) {
-  ctx.db.prepare('INSERT INTO audit_log (company_id,user_id,username,entity,rec_id,action,detail) VALUES (?,?,?,?,?,?,?)')
-    .run(ctx.companyId ?? null, ctx.user.id, ctx.user.username, entity, recId ?? null, action, detail ? String(detail).slice(0, 500) : null);
+export async function audit(ctx, entity, recId, action, detail) {
+  (await ctx.db.run('INSERT INTO audit_log (company_id,user_id,username,entity,rec_id,action,detail) VALUES (?,?,?,?,?,?,?)', ctx.companyId ?? null, ctx.user.id, ctx.user.username, entity, recId ?? null, action, detail ? String(detail).slice(0, 500) : null));
 }
 
-export function nextNumber(ctx, def) {
-  ctx.db.prepare('INSERT INTO counters (company_id,key,n) VALUES (?,?,1) ON CONFLICT(company_id,key) DO UPDATE SET n=n+1').run(ctx.companyId, def.key);
-  const n = ctx.db.prepare('SELECT n FROM counters WHERE company_id=? AND key=?').get(ctx.companyId, def.key).n;
+export async function nextNumber(ctx, def) {
+  (await ctx.db.run('INSERT INTO counters (company_id,key,n) VALUES (?,?,1) ON CONFLICT(company_id,key) DO UPDATE SET n=counters.n+1', ctx.companyId, def.key));
+  const n = (await ctx.db.get('SELECT n FROM counters WHERE company_id=? AND key=?', ctx.companyId, def.key)).n;
   return `${def.numbering}-${String(n).padStart(4, '0')}`;
 }
 
-function coerce(ctx, def, f, v) {
+async function coerce(ctx, def, f, v) {
   if (v === undefined || v === null || v === '') return null;
   switch (f.type) {
     case 'text': case 'textarea': {
@@ -39,7 +38,7 @@ function coerce(ctx, def, f, v) {
       const id = Number(v);
       if (!Number.isInteger(id)) throw bad(`«${f.label}» نامعتبر است`);
       // جلوگیری از ارجاع بین‌شرکتی (Tenant isolation)
-      if (!ctx.db.prepare(`SELECT 1 FROM e_${f.ref} WHERE id=? AND company_id=?`).get(id, ctx.companyId)) throw bad(`«${f.label}» یافت نشد`);
+      if (!(await ctx.db.get(`SELECT 1 FROM e_${f.ref} WHERE id=? AND company_id=?`, id, ctx.companyId))) throw bad(`«${f.label}» یافت نشد`);
       return id;
     }
     case 'password': if (typeof v !== 'string' || v.length < 6) throw bad('گذرواژه حداقل ۶ نویسه باشد'); return hashPassword(v);
@@ -55,8 +54,8 @@ function decode(def, row) {
   return row;
 }
 
-export function getRow(ctx, def, id, { raw } = {}) {
-  const row = ctx.db.prepare(`SELECT * FROM ${table(def)} WHERE id=? AND company_id=?`).get(Number(id), ctx.companyId);
+export async function getRow(ctx, def, id, { raw } = {}) {
+  const row = (await ctx.db.get(`SELECT * FROM ${table(def)} WHERE id=? AND company_id=?`, Number(id), ctx.companyId));
   if (!row) return null;
   if (raw) { for (const f of def.fields) if (f.type === 'lines') { try { row[f.k] = JSON.parse(row[f.k] || '[]'); } catch { row[f.k] = []; } } return row; }
   return decode(def, row);
@@ -67,12 +66,12 @@ export function labelOf(def, row) {
 }
 
 // افزودن برچسب فیلدهای ارجاعی به ردیف‌ها (برای نمایش)
-function withLabels(ctx, def, rows) {
+async function withLabels(ctx, def, rows) {
   for (const f of def.fields.filter((x) => x.type === 'ref')) {
     const ids = [...new Set(rows.map((r) => r[f.k]).filter(Boolean))];
     if (!ids.length) continue;
     const rdef = ENTITIES[f.ref];
-    const found = ctx.db.prepare(`SELECT * FROM e_${f.ref} WHERE company_id=? AND id IN (${ids.map(() => '?').join(',')})`).all(ctx.companyId, ...ids);
+    const found = (await ctx.db.all(`SELECT * FROM e_${f.ref} WHERE company_id=? AND id IN (${ids.map(() => '?').join(',')})`, ctx.companyId, ...ids));
     const map = new Map(found.map((r) => [r.id, labelOf(rdef, r)]));
     for (const r of rows) { r._l = r._l || {}; if (r[f.k]) r._l[f.k] = map.get(r[f.k]) || '—'; }
   }
@@ -93,27 +92,26 @@ function filterClause(def, query) {
   return { sql: where.join(' AND '), extra };
 }
 
-export function list(ctx, def, query) {
+export async function list(ctx, def, query) {
   const { sql, extra } = filterClause(def, query);
   const size = Math.min(Math.max(parseInt(query.size) || 25, 1), 500);
   const page = Math.max(parseInt(query.page) || 1, 1);
   const sortable = new Set(['id', 'created_at', ...def.fields.map((f) => f.k)]);
   const sort = sortable.has(query.sort) ? query.sort : (def.sortDefault || 'id');
   const dir = query.dir === 'asc' ? 'ASC' : (query.dir === 'desc' ? 'DESC' : (sort === 'id' || def.sortDefault === sort ? 'DESC' : 'ASC'));
-  const total = ctx.db.prepare(`SELECT COUNT(*) n FROM ${table(def)} WHERE ${sql}`).get(ctx.companyId, ...extra).n;
-  const rows = ctx.db.prepare(`SELECT * FROM ${table(def)} WHERE ${sql} ORDER BY ${q(sort)} ${dir}, id DESC LIMIT ? OFFSET ?`)
-    .all(ctx.companyId, ...extra, size, (page - 1) * size).map((r) => decode(def, r));
-  return { rows: withLabels(ctx, def, rows), total, page, size };
+  const total = (await ctx.db.get(`SELECT COUNT(*) n FROM ${table(def)} WHERE ${sql}`, ctx.companyId, ...extra)).n;
+  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE ${sql} ORDER BY ${q(sort)} ${dir}, id DESC LIMIT ? OFFSET ?`, ctx.companyId, ...extra, size, (page - 1) * size)).map((r) => decode(def, r));
+  return { rows: await withLabels(ctx, def, rows), total, page, size };
 }
 
-export function getOne(ctx, def, id) {
-  const r = getRow(ctx, def, id);
+export async function getOne(ctx, def, id) {
+  const r = await getRow(ctx, def, id);
   if (!r) throw new HttpError(404, 'رکورد یافت نشد');
-  withLabels(ctx, def, [r]);
+  await withLabels(ctx, def, [r]);
   return r;
 }
 
-function build(ctx, def, input, old) {
+async function build(ctx, def, input, old) {
   const rec = old ? { ...old } : {};
   for (const f of def.fields) {
     if (f.readonly) {
@@ -122,7 +120,7 @@ function build(ctx, def, input, old) {
     }
     if (input[f.k] !== undefined) {
       if (f.type === 'password' && (input[f.k] === '' || input[f.k] === null)) continue; // بدون تغییر
-      rec[f.k] = coerce(ctx, def, f, input[f.k]);
+      rec[f.k] = await coerce(ctx, def, f, input[f.k]);
     } else if (!old) {
       rec[f.k] = f.default === '$today' ? today() : (f.default ?? null);
     }
@@ -139,78 +137,76 @@ function persistValue(f, v) {
 }
 
 function mapDbError(e, def) {
-  if (String(e.message).includes('UNIQUE')) {
-    const f = def.fields.find((x) => x.unique && String(e.message).includes(`.${x.k}`)) || def.fields.find((x) => x.unique);
+  const msg = String(e.message) + ' ' + (e.detail || '') + ' ' + (e.constraint || '');
+  if (/unique|duplicate key/i.test(msg)) {
+    const f = def.fields.find((x) => x.unique && msg.includes(x.k)) || def.fields.find((x) => x.unique);
     return new HttpError(409, `«${f?.label || 'مقدار'}» تکراری است`);
   }
   return e;
 }
 
-export function create(ctx, def, input) {
-  const rec = build(ctx, def, input, null);
-  def.validate?.(ctx, rec, null);
-  if (def.numbering) rec.number = nextNumber(ctx, def);
+export async function create(ctx, def, input) {
+  const rec = await build(ctx, def, input, null);
+  await def.validate?.(ctx, rec, null);
+  if (def.numbering) rec.number = await nextNumber(ctx, def);
   const fields = def.fields;
   try {
-    const r = ctx.db.prepare(`INSERT INTO ${table(def)} (company_id,${fields.map((f) => q(f.k)).join(',')},created_by) VALUES (?,${fields.map(() => '?').join(',')},?)`)
-      .run(ctx.companyId, ...fields.map((f) => persistValue(f, rec[f.k])), ctx.user.id);
-    const id = Number(r.lastInsertRowid);
-    const saved = getRow(ctx, def, id, { raw: true });
-    def.afterSave?.(ctx, saved, null);
-    audit(ctx, def.key, id, 'create', labelOf(def, saved));
-    return getOne(ctx, def, id);
+    const id = (await ctx.db.insert(`INSERT INTO ${table(def)} (company_id,${fields.map((f) => q(f.k)).join(',')},created_by) VALUES (?,${fields.map(() => '?').join(',')},?)`, ctx.companyId, ...fields.map((f) => persistValue(f, rec[f.k])), ctx.user.id));
+    const saved = await getRow(ctx, def, id, { raw: true });
+    await def.afterSave?.(ctx, saved, null);
+    await audit(ctx, def.key, id, 'create', labelOf(def, saved));
+    return await getOne(ctx, def, id);
   } catch (e) { throw mapDbError(e, def); }
 }
 
-export function update(ctx, def, id, input) {
+export async function update(ctx, def, id, input) {
   if (def.noEdit) throw new HttpError(405, 'این مورد قابل ویرایش نیست');
-  const old = getRow(ctx, def, id, { raw: true });
+  const old = await getRow(ctx, def, id, { raw: true });
   if (!old) throw new HttpError(404, 'رکورد یافت نشد');
-  const rec = build(ctx, def, input, old);
-  def.validate?.(ctx, rec, old);
+  const rec = await build(ctx, def, input, old);
+  await def.validate?.(ctx, rec, old);
   const fields = def.fields;
   try {
-    ctx.db.prepare(`UPDATE ${table(def)} SET ${fields.map((f) => `${q(f.k)}=?`).join(',')}, updated_at=datetime('now') WHERE id=? AND company_id=?`)
-      .run(...fields.map((f) => persistValue(f, rec[f.k])), old.id, ctx.companyId);
-    const saved = getRow(ctx, def, id, { raw: true });
-    def.afterSave?.(ctx, saved, old);
-    audit(ctx, def.key, old.id, 'update', labelOf(def, saved));
-    return getOne(ctx, def, id);
+    (await ctx.db.run(`UPDATE ${table(def)} SET ${fields.map((f) => `${q(f.k)}=?`).join(',')}, updated_at=datetime('now') WHERE id=? AND company_id=?`, ...fields.map((f) => persistValue(f, rec[f.k])), old.id, ctx.companyId));
+    const saved = await getRow(ctx, def, id, { raw: true });
+    await def.afterSave?.(ctx, saved, old);
+    await audit(ctx, def.key, old.id, 'update', labelOf(def, saved));
+    return await getOne(ctx, def, id);
   } catch (e) { throw mapDbError(e, def); }
 }
 
-export function remove(ctx, def, id) {
-  const old = getRow(ctx, def, id, { raw: true });
+export async function remove(ctx, def, id) {
+  const old = await getRow(ctx, def, id, { raw: true });
   if (!old) throw new HttpError(404, 'رکورد یافت نشد');
-  def.canDelete?.(old, ctx);
-  try { ctx.db.prepare(`DELETE FROM ${table(def)} WHERE id=? AND company_id=?`).run(old.id, ctx.companyId); }
+  await def.canDelete?.(old, ctx);
+  try { (await ctx.db.run(`DELETE FROM ${table(def)} WHERE id=? AND company_id=?`, old.id, ctx.companyId)); }
   catch (e) { throw mapDbError(e, def); }
-  def.afterDelete?.(ctx, old);
-  audit(ctx, def.key, old.id, 'delete', labelOf(def, old));
+  await def.afterDelete?.(ctx, old);
+  await audit(ctx, def.key, old.id, 'delete', labelOf(def, old));
   return { ok: true };
 }
 
-export function runAction(ctx, def, id, key) {
+export async function runAction(ctx, def, id, key) {
   const act = (def.actions || []).find((a) => a.key === key);
   if (!act) throw new HttpError(404, 'عملیات نامعتبر است');
-  const rec = getRow(ctx, def, id, { raw: true });
+  const rec = await getRow(ctx, def, id, { raw: true });
   if (!rec) throw new HttpError(404, 'رکورد یافت نشد');
   if (!act.from.includes(rec.status)) throw new HttpError(409, 'این عملیات در وضعیت فعلی مجاز نیست');
-  act.run?.(ctx, rec);
-  ctx.db.prepare(`UPDATE ${table(def)} SET status=?, updated_at=datetime('now') WHERE id=? AND company_id=?`).run(act.to, rec.id, ctx.companyId);
-  audit(ctx, def.key, rec.id, 'action:' + key, labelOf(def, rec));
-  return getOne(ctx, def, id);
+  await act.run?.(ctx, rec);
+  (await ctx.db.run(`UPDATE ${table(def)} SET status=?, updated_at=datetime('now') WHERE id=? AND company_id=?`, act.to, rec.id, ctx.companyId));
+  await audit(ctx, def.key, rec.id, 'action:' + key, labelOf(def, rec));
+  return await getOne(ctx, def, id);
 }
 
 // فهرست سبک برای انتخابگرها
-export function lookup(ctx, def) {
-  const rows = ctx.db.prepare(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id DESC LIMIT 2000`).all(ctx.companyId);
+export async function lookup(ctx, def) {
+  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id DESC LIMIT 2000`, ctx.companyId));
   return rows.map((r) => ({ id: r.id, label: labelOf(def, r), price: r.price ?? r.cost ?? null, cost: r.cost ?? null, unit: r.unit ?? null }));
 }
 
-export function toCsv(ctx, def) {
-  const rows = ctx.db.prepare(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id`).all(ctx.companyId).map((r) => decode(def, r));
-  withLabels(ctx, def, rows);
+export async function toCsv(ctx, def) {
+  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id`, ctx.companyId)).map((r) => decode(def, r));
+  await withLabels(ctx, def, rows);
   const fields = def.fields.filter((f) => f.type !== 'lines' && f.type !== 'password');
   const esc = (v) => {
     let s = v === null || v === undefined ? '' : String(v);

@@ -22,19 +22,21 @@ export const MODULES = {
 const S = (...a) => a.map(([v, l, c]) => ({ v, l, c }));
 const ACTIVE = S(['active', 'فعال', 'ok'], ['inactive', 'غیرفعال', 'mute']);
 
-function prepLines(ctx, rec) {
+async function prepLines(ctx, rec) {
   const lines = Array.isArray(rec.lines) ? rec.lines : [];
   if (!lines.length) throw bad('حداقل یک ردیف کالا لازم است');
   let sub = 0;
-  rec.lines = lines.map((l, i) => {
-    const item = ctx.db.prepare('SELECT id FROM e_items WHERE id=? AND company_id=?').get(Number(l.item_id), ctx.companyId);
+  const out = [];
+  for (const [i, l] of lines.entries()) {
+    const item = await ctx.db.get('SELECT id FROM e_items WHERE id=? AND company_id=?', Number(l.item_id), ctx.companyId);
     if (!item) throw bad(`ردیف ${i + 1}: کالا نامعتبر است`);
     const qty = Number(l.qty), price = Number(l.price);
     if (!(qty > 0)) throw bad(`ردیف ${i + 1}: تعداد باید بزرگ‌تر از صفر باشد`);
     if (!(price >= 0)) throw bad(`ردیف ${i + 1}: قیمت نامعتبر است`);
     sub += qty * price;
-    return { item_id: item.id, qty, price };
-  });
+    out.push({ item_id: item.id, qty, price });
+  }
+  rec.lines = out;
   const tax = Number(rec.tax_percent || 0);
   if (tax < 0 || tax > 100) throw bad('درصد مالیات نامعتبر است');
   rec.tax_percent = tax;
@@ -46,15 +48,15 @@ const ITEM_LINE_COLS = (price) => [
   { k: 'item_id', label: 'کالا', type: 'ref', ref: 'items' }, { k: 'qty', label: 'تعداد', type: 'number' },
   ...(price ? [{ k: 'price', label: 'قیمت واحد', type: 'number' }] : []),
 ];
-const itemInfo = (ctx, id) => ctx.db.prepare('SELECT id,name,cost,kind FROM e_items WHERE id=? AND company_id=?').get(id, ctx.companyId);
+const itemInfo = async (ctx, id) => (await ctx.db.get('SELECT id,name,cost,kind FROM e_items WHERE id=? AND company_id=?', id, ctx.companyId));
 
 const orderRules = (what) => ({
-  validate(ctx, rec, old) {
+  async validate(ctx, rec, old) {
     if (old && old.status !== 'draft') throw new HttpError(409, `فقط ${what} پیش‌نویس قابل ویرایش است`);
-    prepLines(ctx, rec);
+    await prepLines(ctx, rec);
   },
   editWhen: ['draft'],
-  canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط پیش‌نویس یا لغوشده قابل حذف است'); },
+  async canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط پیش‌نویس یا لغوشده قابل حذف است'); },
 });
 
 const dateField = (k, label, extra = {}) => ({ k, label, type: 'date', ...extra });
@@ -97,7 +99,7 @@ export const ENTITIES = {
       { k: 'reason', label: 'توضیحات', type: 'textarea' },
     ],
     editWhen: ['pending'],
-    validate(ctx, rec, old) {
+    async validate(ctx, rec, old) {
       if (old && old.status !== 'pending') throw new HttpError(409, 'درخواست بررسی‌شده قابل ویرایش نیست');
       if (rec.to_date < rec.from_date) throw bad('تاریخ پایان قبل از شروع است');
       rec.days = daysBetween(rec.from_date, rec.to_date) + 1;
@@ -142,11 +144,11 @@ export const ENTITIES = {
       { k: 'note', label: 'توضیحات', type: 'text' },
       { k: 'source', label: 'منبع سیستمی', type: 'text', readonly: true },
     ],
-    validate(ctx, rec) {
-      if (rec.kind === 'out' && stockOf(ctx.db, ctx.companyId, rec.item_id, rec.warehouse_id) < rec.qty)
+    async validate(ctx, rec) {
+      if (rec.kind === 'out' && await stockOf(ctx.db, ctx.companyId, rec.item_id, rec.warehouse_id) < rec.qty)
         throw new HttpError(409, 'موجودی انبار برای این خروج کافی نیست');
     },
-    canDelete(rec) { if (rec.source) throw new HttpError(409, 'تراکنش سیستمی (ناشی از سفارش) قابل حذف نیست'); },
+    async canDelete(rec) { if (rec.source) throw new HttpError(409, 'تراکنش سیستمی (ناشی از سفارش) قابل حذف نیست'); },
   },
 
   // ───────────── خرید ─────────────
@@ -180,18 +182,18 @@ export const ENTITIES = {
       { key: 'approve', label: 'تأیید', from: ['draft'], to: 'approved', style: 'ok' },
       {
         key: 'receive', label: 'دریافت کالا به انبار', from: ['approved'], to: 'received', style: 'ok', confirm: 'کالاها به انبار وارد شوند؟',
-        run(ctx, rec) {
+        async run(ctx, rec) {
           if (!rec.warehouse_id) throw bad('ابتدا «انبار تحویل» را در سفارش مشخص کنید');
           const byAcc = {};
           for (const l of rec.lines) {
-            applyAvgCost(ctx, l.item_id, l.qty, l.price); // قبل از ورود به انبار
-            insertMove(ctx, { kind: 'in', item_id: l.item_id, warehouse_id: rec.warehouse_id, qty: l.qty, ref: rec.number, note: 'دریافت سفارش خرید', source: rec.number });
-            const k = invKey(itemInfo(ctx, l.item_id).kind); byAcc[k] = (byAcc[k] || 0) + l.qty * l.price;
+            await applyAvgCost(ctx, l.item_id, l.qty, l.price); // قبل از ورود به انبار
+            await insertMove(ctx, { kind: 'in', item_id: l.item_id, warehouse_id: rec.warehouse_id, qty: l.qty, ref: rec.number, note: 'دریافت سفارش خرید', source: rec.number });
+            const k = invKey((await itemInfo(ctx, l.item_id)).kind); byAcc[k] = (byAcc[k] || 0) + l.qty * l.price;
           }
-          ACC.autoPost(ctx, {
+          await ACC.autoPost(ctx, {
             date: new Date().toISOString().slice(0, 10), description: `دریافت سفارش خرید ${rec.number}`, source: 'purchase_orders', source_ref: rec.id,
-            lines: [...Object.entries(byAcc).map(([k, v]) => ({ account_id: ACC.acct(ctx, k), debit: Math.round(v) })),
-              { account_id: ACC.acct(ctx, 'vat_in'), debit: rec.total - rec.subtotal }, { account_id: ACC.acct(ctx, 'ap'), credit: rec.total, supplier_id: rec.supplier_id }],
+            lines: [...(await Promise.all(Object.entries(byAcc).map(async ([k, v]) => ({ account_id: await ACC.acct(ctx, k), debit: Math.round(v) })))),
+              { account_id: await ACC.acct(ctx, 'vat_in'), debit: rec.total - rec.subtotal }, { account_id: await ACC.acct(ctx, 'ap'), credit: rec.total, supplier_id: rec.supplier_id }],
           });
         },
       },
@@ -230,37 +232,37 @@ export const ENTITIES = {
     actions: [
       {
         key: 'confirm', label: 'تأیید سفارش', from: ['draft'], to: 'confirmed', style: 'ok',
-        run(ctx, rec) {
-          const cu = ctx.db.prepare('SELECT credit_limit FROM e_customers WHERE id=? AND company_id=?').get(rec.customer_id, ctx.companyId);
+        async run(ctx, rec) {
+          const cu = (await ctx.db.get('SELECT credit_limit FROM e_customers WHERE id=? AND company_id=?', rec.customer_id, ctx.companyId));
           if (cu?.credit_limit > 0) {
-            const bal = customerBalance(ctx.db, ctx.companyId, rec.customer_id);
+            const bal = await customerBalance(ctx.db, ctx.companyId, rec.customer_id);
             if (bal + rec.total > cu.credit_limit) throw new HttpError(409, `سقف اعتبار مشتری رد می‌شود (مانده فعلی ${bal.toLocaleString('fa-IR')} + این سفارش ${rec.total.toLocaleString('fa-IR')})`);
           }
         },
       },
       {
         key: 'ship', label: 'ارسال و صدور فاکتور', from: ['confirmed'], to: 'shipped', style: 'ok', confirm: 'کالا از انبار خارج و فاکتور صادر شود؟',
-        run(ctx, rec) {
+        async run(ctx, rec) {
           if (!rec.warehouse_id) throw bad('ابتدا «انبار ارسال» را در سفارش مشخص کنید');
           const need = new Map();
           for (const l of rec.lines) need.set(l.item_id, (need.get(l.item_id) || 0) + l.qty);
           for (const [id, q] of need) {
-            const have = stockOf(ctx.db, ctx.companyId, id, rec.warehouse_id);
+            const have = await stockOf(ctx.db, ctx.companyId, id, rec.warehouse_id);
             if (have < q) {
-              const it = ctx.db.prepare('SELECT code,name FROM e_items WHERE id=?').get(id);
+              const it = (await ctx.db.get('SELECT code,name FROM e_items WHERE id=?', id));
               throw new HttpError(409, `موجودی «${it.name}» کافی نیست (موجودی ${have}، نیاز ${q})`);
             }
           }
           const cogs = {}; let cogsTotal = 0;
           for (const l of rec.lines) {
-            const it = itemInfo(ctx, l.item_id), v = l.qty * (it.cost || 0);
-            insertMove(ctx, { kind: 'out', item_id: l.item_id, warehouse_id: rec.warehouse_id, qty: l.qty, ref: rec.number, note: 'ارسال سفارش فروش', source: rec.number });
+            const it = await itemInfo(ctx, l.item_id), v = l.qty * (it.cost || 0);
+            await insertMove(ctx, { kind: 'out', item_id: l.item_id, warehouse_id: rec.warehouse_id, qty: l.qty, ref: rec.number, note: 'ارسال سفارش فروش', source: rec.number });
             const k = invKey(it.kind); cogs[k] = (cogs[k] || 0) + v; cogsTotal += v;
           }
-          ACC.autoPost(ctx, {
+          await ACC.autoPost(ctx, {
             date: rec.date, description: `فاکتور فروش ${rec.number}`, source: 'sales_orders', source_ref: rec.id,
-            lines: [{ account_id: ACC.acct(ctx, 'ar'), debit: rec.total, customer_id: rec.customer_id }, { account_id: ACC.acct(ctx, 'sales'), credit: rec.subtotal }, { account_id: ACC.acct(ctx, 'vat_out'), credit: rec.total - rec.subtotal },
-              { account_id: ACC.acct(ctx, 'cogs'), debit: Math.round(cogsTotal) }, ...Object.entries(cogs).map(([k, v]) => ({ account_id: ACC.acct(ctx, k), credit: Math.round(v) }))],
+            lines: [{ account_id: await ACC.acct(ctx, 'ar'), debit: rec.total, customer_id: rec.customer_id }, { account_id: await ACC.acct(ctx, 'sales'), credit: rec.subtotal }, { account_id: await ACC.acct(ctx, 'vat_out'), credit: rec.total - rec.subtotal },
+              { account_id: await ACC.acct(ctx, 'cogs'), debit: Math.round(cogsTotal) }, ...(await Promise.all(Object.entries(cogs).map(async ([k, v]) => ({ account_id: await ACC.acct(ctx, k), credit: Math.round(v) }))))],
           });
         },
       },
@@ -282,20 +284,20 @@ export const ENTITIES = {
       { k: 'reference', label: 'شماره مرجع/چک', type: 'text' },
       { k: 'note', label: 'توضیحات', type: 'textarea' },
     ],
-    validate(ctx, rec) {
+    async validate(ctx, rec) {
       if (rec.kind === 'receipt') { if (!rec.customer_id) throw bad('برای دریافت، مشتری الزامی است'); rec.supplier_id = null; }
       if (rec.kind === 'payment') { if (!rec.supplier_id) throw bad('برای پرداخت، تأمین‌کننده الزامی است'); rec.customer_id = null; }
     },
-    afterSave(ctx, rec, old) {
-      if (old) ACC.reverseBySource(ctx, 'payments', rec.id);
-      const cash = ACC.accountingOn(ctx) ? ACC.acct(ctx, rec.method === 'cash' ? 'cash' : 'bank') : null;
+    async afterSave(ctx, rec, old) {
+      if (old) await ACC.reverseBySource(ctx, 'payments', rec.id);
+      const cash = await ACC.accountingOn(ctx) ? await ACC.acct(ctx, rec.method === 'cash' ? 'cash' : 'bank') : null;
       if (!cash) return;
       const recv = rec.kind === 'receipt';
-      ACC.autoPost(ctx, { date: rec.date, description: `${recv ? 'دریافت' : 'پرداخت'} ${rec.number}`, source: 'payments', source_ref: rec.id,
-        lines: recv ? [{ account_id: cash, debit: rec.amount }, { account_id: ACC.acct(ctx, 'ar'), credit: rec.amount, customer_id: rec.customer_id }]
-          : [{ account_id: ACC.acct(ctx, 'ap'), debit: rec.amount, supplier_id: rec.supplier_id }, { account_id: cash, credit: rec.amount }] });
+      await ACC.autoPost(ctx, { date: rec.date, description: `${recv ? 'دریافت' : 'پرداخت'} ${rec.number}`, source: 'payments', source_ref: rec.id,
+        lines: recv ? [{ account_id: cash, debit: rec.amount }, { account_id: await ACC.acct(ctx, 'ar'), credit: rec.amount, customer_id: rec.customer_id }]
+          : [{ account_id: await ACC.acct(ctx, 'ap'), debit: rec.amount, supplier_id: rec.supplier_id }, { account_id: cash, credit: rec.amount }] });
     },
-    afterDelete(ctx, rec) { ACC.reverseBySource(ctx, 'payments', rec.id); },
+    async afterDelete(ctx, rec) { await ACC.reverseBySource(ctx, 'payments', rec.id); },
   },
   expenses: {
     module: 'finance', title: 'هزینه‌ها', singular: 'هزینه', label: ['description'], sortDefault: 'date', search: ['description', 'paid_to'],
@@ -308,13 +310,13 @@ export const ENTITIES = {
       { k: 'method', label: 'روش پرداخت', type: 'select', options: S(['cash', 'نقد'], ['bank', 'بانک']), default: 'bank' },
       { k: 'project_id', label: 'پروژه', type: 'ref', ref: 'projects' },
     ],
-    afterSave(ctx, rec, old) {
-      if (old) ACC.reverseBySource(ctx, 'expenses', rec.id);
-      if (!ACC.accountingOn(ctx)) return;
-      ACC.autoPost(ctx, { date: rec.date, description: `هزینه: ${rec.description}`, source: 'expenses', source_ref: rec.id,
-        lines: [{ account_id: ACC.acct(ctx, 'exp_' + rec.category), debit: rec.amount }, { account_id: ACC.acct(ctx, rec.method === 'cash' ? 'cash' : 'bank'), credit: rec.amount }] });
+    async afterSave(ctx, rec, old) {
+      if (old) await ACC.reverseBySource(ctx, 'expenses', rec.id);
+      if (!await ACC.accountingOn(ctx)) return;
+      await ACC.autoPost(ctx, { date: rec.date, description: `هزینه: ${rec.description}`, source: 'expenses', source_ref: rec.id,
+        lines: [{ account_id: await ACC.acct(ctx, 'exp_' + rec.category), debit: rec.amount }, { account_id: await ACC.acct(ctx, rec.method === 'cash' ? 'cash' : 'bank'), credit: rec.amount }] });
     },
-    afterDelete(ctx, rec) { ACC.reverseBySource(ctx, 'expenses', rec.id); },
+    async afterDelete(ctx, rec) { await ACC.reverseBySource(ctx, 'expenses', rec.id); },
   },
 
   // ───────────── پروژه‌ها ─────────────
@@ -332,7 +334,7 @@ export const ENTITIES = {
       { k: 'progress', label: 'پیشرفت (٪)', type: 'number', readonly: true, default: 0, list: true, display: 'progress' },
       { k: 'description', label: 'توضیحات', type: 'textarea' },
     ],
-    validate(ctx, rec) { if (rec.start_date && rec.end_date && rec.end_date < rec.start_date) throw bad('تاریخ پایان قبل از شروع است'); },
+    async validate(ctx, rec) { if (rec.start_date && rec.end_date && rec.end_date < rec.start_date) throw bad('تاریخ پایان قبل از شروع است'); },
   },
   tasks: {
     module: 'projects', title: 'وظایف (WBS)', singular: 'وظیفه', label: ['title'], search: ['title'], sortDefault: 'due_date',
@@ -346,14 +348,14 @@ export const ENTITIES = {
       { k: 'status', label: 'وضعیت', type: 'select', default: 'todo', list: true, filter: true, options: S(['todo', 'انجام نشده', 'mute'], ['doing', 'در حال انجام', 'info'], ['review', 'در بازبینی', 'warn'], ['done', 'انجام شد', 'ok']) },
       { k: 'progress', label: 'پیشرفت (٪)', type: 'number', min: 0, max: 100, default: 0, list: true, display: 'progress' },
     ],
-    validate(ctx, rec) {
+    async validate(ctx, rec) {
       if (rec.status === 'done') rec.progress = 100;
       if (rec.start_date && rec.due_date && rec.due_date < rec.start_date) throw bad('سررسید قبل از شروع است');
     },
-    afterSave(ctx, rec, old) {
-      for (const pid of new Set([rec.project_id, old?.project_id].filter(Boolean))) recalcProject(ctx, pid);
+    async afterSave(ctx, rec, old) {
+      for (const pid of new Set([rec.project_id, old?.project_id].filter(Boolean))) await recalcProject(ctx, pid);
     },
-    afterDelete(ctx, rec) { recalcProject(ctx, rec.project_id); },
+    async afterDelete(ctx, rec) { await recalcProject(ctx, rec.project_id); },
   },
 
   // ───────────── کیفیت ─────────────
@@ -373,7 +375,7 @@ export const ENTITIES = {
       dateField('due_date', 'مهلت اقدام', { list: true }),
       { k: 'status', label: 'وضعیت', type: 'select', default: 'open', list: true, filter: true, options: S(['open', 'باز', 'bad'], ['analysis', 'در حال ریشه‌یابی', 'warn'], ['action', 'در حال اقدام', 'info'], ['verify', 'در انتظار تأیید اثربخشی', 'warn'], ['closed', 'بسته شده', 'ok']) },
     ],
-    validate(ctx, rec) {
+    async validate(ctx, rec) {
       if (rec.status === 'closed' && (!rec.root_cause || !rec.corrective_action)) throw bad('برای بستن NCR، ریشه‌یابی و اقدام اصلاحی الزامی است');
     },
   },
@@ -401,12 +403,12 @@ export const ENTITIES = {
       { k: 'sys_key', label: 'کلید سیستمی', type: 'text', readonly: true },
       { k: 'active', label: 'فعال', type: 'bool', default: 1, list: true },
     ],
-    validate(ctx, rec, old) {
-      if (old && old.type !== rec.type && ACC.hasGl(ctx, old.id)) throw bad('ماهیت حساب دارای گردش قابل تغییر نیست');
+    async validate(ctx, rec, old) {
+      if (old && old.type !== rec.type && await ACC.hasGl(ctx, old.id)) throw bad('ماهیت حساب دارای گردش قابل تغییر نیست');
     },
-    canDelete(rec, ctx) {
+    async canDelete(rec, ctx) {
       if (rec.sys_key) throw new HttpError(409, 'حساب سیستمی (مورد استفاده‌ی ثبت خودکار) قابل حذف نیست؛ می‌توانید آن را غیرفعال کنید');
-      if (ACC.hasGl(ctx, rec.id)) throw new HttpError(409, 'حساب دارای گردش است و قابل حذف نیست');
+      if (await ACC.hasGl(ctx, rec.id)) throw new HttpError(409, 'حساب دارای گردش است و قابل حذف نیست');
     },
   },
   journal_entries: {
@@ -422,19 +424,19 @@ export const ENTITIES = {
       { k: 'total', label: 'مبلغ سند', type: 'money', readonly: true, list: true },
     ],
     editWhen: ['draft'],
-    validate(ctx, rec, old) {
+    async validate(ctx, rec, old) {
       if (old && old.status !== 'draft') throw new HttpError(409, 'فقط سند پیش‌نویس قابل ویرایش است');
-      const r = ACC.cleanLines(ctx, rec.lines, { manual: true });
+      const r = await ACC.cleanLines(ctx, rec.lines, { manual: true });
       rec.lines = r.lines; rec.total = r.total;
     },
-    canDelete(rec) { if (rec.status !== 'draft') throw new HttpError(409, 'سند قطعی قابل حذف نیست؛ از «برگشت سند» استفاده کنید'); },
+    async canDelete(rec) { if (rec.status !== 'draft') throw new HttpError(409, 'سند قطعی قابل حذف نیست؛ از «برگشت سند» استفاده کنید'); },
     actions: [
       { key: 'post', label: 'قطعی‌کردن', from: ['draft'], to: 'posted', style: 'ok', confirm: 'سند قطعی شود؟ پس از آن قابل ویرایش نخواهد بود.', run: (ctx, rec) => ACC.postDraft(ctx, rec) },
       {
         key: 'reverse', label: 'برگشت سند', from: ['posted'], to: 'reversed', style: 'bad', confirm: 'یک سند برگشتی ثبت و این سند برگشت‌خورده می‌شود. ادامه؟',
-        run(ctx, rec) {
+        async run(ctx, rec) {
           if (!['manual', 'closing'].includes(rec.source)) throw new HttpError(409, 'سند خودکار را از طریق سند مبدأ (فروش/خرید/دریافت/…) اصلاح کنید');
-          ACC.reverseEntry(ctx, rec);
+          await ACC.reverseEntry(ctx, rec);
         },
       },
     ],
@@ -457,16 +459,18 @@ export const ENTITIES = {
       { k: 'lines', label: 'مواد مصرفی هر بچ', type: 'lines', cols: ITEM_LINE_COLS(false) },
       { k: 'notes', label: 'توضیحات', type: 'textarea' },
     ],
-    validate(ctx, rec) {
+    async validate(ctx, rec) {
       const lines = Array.isArray(rec.lines) ? rec.lines : [];
       if (!lines.length) throw bad('حداقل یک ماده‌ی مصرفی لازم است');
-      rec.lines = lines.map((l, i) => {
-        const it = itemInfo(ctx, Number(l.item_id));
+      const out = [];
+      for (const [i, l] of lines.entries()) {
+        const it = await itemInfo(ctx, Number(l.item_id));
         if (!it) throw bad(`ردیف ${i + 1}: کالا نامعتبر است`);
         if (it.id === rec.product_id) throw bad('محصول نهایی نمی‌تواند جزو مواد مصرفی خودش باشد');
         if (!(Number(l.qty) > 0)) throw bad(`ردیف ${i + 1}: مقدار باید مثبت باشد`);
-        return { item_id: it.id, qty: Number(l.qty) };
-      });
+        out.push({ item_id: it.id, qty: Number(l.qty) });
+      }
+      rec.lines = out;
     },
   },
   work_orders: {
@@ -490,14 +494,14 @@ export const ENTITIES = {
       { k: 'notes', label: 'توضیحات', type: 'textarea' },
     ],
     editWhen: ['draft', 'released'],
-    validate(ctx, rec, old) {
+    async validate(ctx, rec, old) {
       if (old && !['draft', 'released'].includes(old.status)) throw new HttpError(409, 'دستور تکمیل/لغوشده قابل ویرایش نیست');
-      const b = ctx.db.prepare('SELECT status FROM e_boms WHERE id=? AND company_id=?').get(rec.bom_id, ctx.companyId);
+      const b = (await ctx.db.get('SELECT status FROM e_boms WHERE id=? AND company_id=?', rec.bom_id, ctx.companyId));
       if (b?.status !== 'active') throw bad('BOM انتخاب‌شده فعال نیست');
-      const bom = ctx.db.prepare('SELECT output_qty, hours_per_batch FROM e_boms WHERE id=?').get(rec.bom_id);
+      const bom = (await ctx.db.get('SELECT output_qty, hours_per_batch FROM e_boms WHERE id=?', rec.bom_id));
       rec.planned_hours = plannedHours(bom, rec.qty);
     },
-    canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط پیش‌نویس یا لغوشده قابل حذف است'); },
+    async canDelete(rec) { if (!['draft', 'cancelled'].includes(rec.status)) throw new HttpError(409, 'فقط پیش‌نویس یا لغوشده قابل حذف است'); },
     actions: [
       { key: 'release', label: 'آزادسازی', from: ['draft'], to: 'released', style: 'ok' },
       { key: 'complete', label: 'تکمیل تولید', from: ['released'], to: 'completed', style: 'ok', confirm: 'مواد از انبار خارج و محصول وارد انبار شود؟', run: (ctx, rec) => completeWorkOrder(ctx, rec) },
@@ -526,7 +530,7 @@ export const ENTITIES = {
       { k: 'next_pm_date', label: 'PM بعدی', type: 'date', readonly: true, list: true },
       { k: 'notes', label: 'توضیحات', type: 'textarea' },
     ],
-    validate(ctx, rec) { rec.next_pm_date = nextPm(rec); },
+    async validate(ctx, rec) { rec.next_pm_date = nextPm(rec); },
   },
   maintenance_orders: {
     module: 'production', title: 'دستورکار نگهداری و تعمیرات', singular: 'دستورکار', label: ['number'], numbering: 'MO', sortDefault: 'id', search: ['number', 'description'],
@@ -542,11 +546,11 @@ export const ENTITIES = {
       { k: 'completed_date', label: 'تاریخ انجام', type: 'date', readonly: true },
     ],
     editWhen: ['open', 'in_progress'],
-    validate(ctx, rec, old) { if (old && !['open', 'in_progress'].includes(old.status)) throw new HttpError(409, 'دستورکار پایان‌یافته/لغوشده قابل ویرایش نیست'); },
-    afterSave(ctx, rec, old) {
-      if (!old && rec.kind === 'corrective') ctx.db.prepare(`UPDATE e_machines SET status='down' WHERE id=? AND company_id=? AND status!='retired'`).run(rec.machine_id, ctx.companyId);
+    async validate(ctx, rec, old) { if (old && !['open', 'in_progress'].includes(old.status)) throw new HttpError(409, 'دستورکار پایان‌یافته/لغوشده قابل ویرایش نیست'); },
+    async afterSave(ctx, rec, old) {
+      if (!old && rec.kind === 'corrective') (await ctx.db.run(`UPDATE e_machines SET status='down' WHERE id=? AND company_id=? AND status!='retired'`, rec.machine_id, ctx.companyId));
     },
-    canDelete(rec) { if (rec.status === 'done') throw new HttpError(409, 'دستورکار انجام‌شده قابل حذف نیست'); },
+    async canDelete(rec) { if (rec.status === 'done') throw new HttpError(409, 'دستورکار انجام‌شده قابل حذف نیست'); },
     actions: [
       { key: 'start', label: 'شروع کار', from: ['open'], to: 'in_progress', style: 'ok' },
       { key: 'complete', label: 'پایان کار', from: ['open', 'in_progress'], to: 'done', style: 'ok', confirm: 'دستورکار پایان یابد؟ (تاریخ PM ماشین و هزینه در حسابداری ثبت می‌شود)', run: (ctx, rec) => completeMaintenance(ctx, rec) },
@@ -564,23 +568,23 @@ export const ENTITIES = {
       { k: 'password', label: 'گذرواژه (خالی = بدون تغییر)', type: 'password' },
       { k: 'active', label: 'فعال', type: 'bool', default: 1, list: true },
     ],
-    validate(ctx, rec, old) {
+    async validate(ctx, rec, old) {
       if (!old && !rec.password) throw bad('گذرواژه برای کاربر جدید الزامی است');
       if (old && old.id === ctx.user.id && (!rec.active || rec.role !== old.role)) throw bad('نقش یا وضعیت حساب خودتان را نمی‌توانید تغییر دهید');
     },
-    canDelete(rec, ctx) { if (rec.id === ctx.user.id) throw bad('حذف حساب خودتان ممکن نیست'); },
+    async canDelete(rec, ctx) { if (rec.id === ctx.user.id) throw bad('حذف حساب خودتان ممکن نیست'); },
   },
 };
 
-export function customerBalance(db, companyId, customerId) {
-  const sales = db.prepare(`SELECT COALESCE(SUM(total),0) s FROM e_sales_orders WHERE company_id=? AND customer_id=? AND status IN ('confirmed','shipped')`).get(companyId, customerId).s;
-  const paid = db.prepare(`SELECT COALESCE(SUM(amount),0) s FROM e_payments WHERE company_id=? AND customer_id=? AND kind='receipt'`).get(companyId, customerId).s;
+export async function customerBalance(db, companyId, customerId) {
+  const sales = (await db.get(`SELECT COALESCE(SUM(total),0) s FROM e_sales_orders WHERE company_id=? AND customer_id=? AND status IN ('confirmed','shipped')`, companyId, customerId)).s;
+  const paid = (await db.get(`SELECT COALESCE(SUM(amount),0) s FROM e_payments WHERE company_id=? AND customer_id=? AND kind='receipt'`, companyId, customerId)).s;
   return sales - paid;
 }
 
-function recalcProject(ctx, pid) {
-  const r = ctx.db.prepare('SELECT AVG(progress) a, COUNT(*) n FROM e_tasks WHERE project_id=? AND company_id=?').get(pid, ctx.companyId);
-  if (r.n) ctx.db.prepare('UPDATE e_projects SET progress=? WHERE id=? AND company_id=?').run(Math.round(r.a), pid, ctx.companyId);
+async function recalcProject(ctx, pid) {
+  const r = (await ctx.db.get('SELECT AVG(progress) a, COUNT(*) n FROM e_tasks WHERE project_id=? AND company_id=?', pid, ctx.companyId));
+  if (r.n) (await ctx.db.run('UPDATE e_projects SET progress=? WHERE id=? AND company_id=?', Math.round(r.a), pid, ctx.companyId));
 }
 
 for (const [key, d] of Object.entries(ENTITIES)) d.key = key;
