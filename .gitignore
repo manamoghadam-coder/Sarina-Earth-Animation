@@ -9,3 +9,4 @@ build/mix.wav
 build/music_only.wav
 build/sfx_only.wav
 build/voice_cache/
+dist-zip/
