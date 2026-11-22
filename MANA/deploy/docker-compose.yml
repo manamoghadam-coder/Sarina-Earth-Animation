@@ -1,0 +1,31 @@
+# UNTESTED in the build environment. Put real secrets in deploy/.env (never commit it). Terminate HTTPS in front (Caddy/nginx/Cloudflare): PWA install, push and the microphone REQUIRE https.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment: { POSTGRES_PASSWORD: "${PG_ADMIN_PASSWORD}", OWNER_DB_PASSWORD: "${OWNER_DB_PASSWORD}", APP_DB_PASSWORD: "${APP_DB_PASSWORD}" }
+    volumes: [ "pgdata:/var/lib/postgresql/data", "./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro" ]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U postgres"], interval: 5s, retries: 10 }
+  mana:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    depends_on: { db: { condition: service_healthy } }
+    expose: [ "8080" ]
+    restart: unless-stopped
+    volumes: [ "photos:/app/server/storage" ]
+    environment:
+      DATABASE_URL: "postgres://mana_app:${APP_DB_PASSWORD}@db:5432/mana"
+      DATABASE_URL_OWNER: "postgres://mana_owner:${OWNER_DB_PASSWORD}@db:5432/mana"
+      STORAGE_DIR: /app/server/storage
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      NODE_ENV: production
+  caddy:
+    image: caddy:2
+    ports: [ "80:80", "443:443" ]
+    environment: { DOMAIN: "${DOMAIN}" }
+    volumes: [ "./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data" ]
+    depends_on: [ mana ]
+    restart: unless-stopped
+volumes: { pgdata: {}, photos: {}, caddy_data: {} }

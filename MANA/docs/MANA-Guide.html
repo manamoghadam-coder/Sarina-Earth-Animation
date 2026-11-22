@@ -1,0 +1,156 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>راهنمای کامل MANA</title>
+<style>
+@font-face{font-family:V;font-weight:400;src:url(../web/node_modules/@fontsource/vazirmatn/files/vazirmatn-arabic-400-normal.woff2)}
+@font-face{font-family:V;font-weight:600;src:url(../web/node_modules/@fontsource/vazirmatn/files/vazirmatn-arabic-600-normal.woff2)}
+@font-face{font-family:V;font-weight:800;src:url(../web/node_modules/@fontsource/vazirmatn/files/vazirmatn-arabic-800-normal.woff2)}
+@font-face{font-family:V;font-weight:400;unicode-range:U+0000-00FF;src:url(../web/node_modules/@fontsource/vazirmatn/files/vazirmatn-latin-400-normal.woff2)}
+@page{size:A4;margin:16mm 15mm}
+body{font-family:V,sans-serif;font-size:11.5pt;line-height:1.9;color:#2a1a4d}
+h1{font-size:25pt;color:#4a2a9e;margin:0 0 4px;font-weight:800} h2{font-size:16pt;color:#fff;background:#4a2a9e;padding:6px 12px;border-radius:8px;margin:22px 0 10px;font-weight:800;break-after:avoid}
+h3{font-size:12.5pt;color:#4a2a9e;margin:14px 0 4px;font-weight:800;break-after:avoid}
+.cover{text-align:center;padding:60px 0 30px;break-after:page} .cover img{width:230px;height:230px;border-radius:50%;box-shadow:0 4px 18px #7c4ddb55}
+.sub{color:#7a5fc0;font-size:13pt}
+code,pre{font-family:Consolas,monospace;direction:ltr;unicode-bidi:plaintext}
+pre{background:#f3eefc;border:1px solid #d9cdf2;border-radius:8px;padding:8px 12px;font-size:9.5pt;line-height:1.5;text-align:left;white-space:pre-wrap;break-inside:avoid;margin:6px 0}
+code{background:#f3eefc;padding:0 4px;border-radius:4px;font-size:10pt}
+ol,ul{padding-inline-start:22px;margin:4px 0} li{margin:2px 0}
+table{border-collapse:collapse;width:100%;margin:8px 0;break-inside:avoid} th,td{border:1px solid #d9cdf2;padding:5px 8px;text-align:right;font-size:10.5pt} th{background:#ede6fb}
+.note{background:#fff7e0;border-right:5px solid #f0b429;padding:8px 12px;border-radius:6px;margin:10px 0;break-inside:avoid}
+.warn{background:#fdecef;border-right:5px solid #d9395b;padding:8px 12px;border-radius:6px;margin:10px 0;break-inside:avoid}
+.ok{background:#e9f8ef;border-right:5px solid #2f9e5f;padding:8px 12px;border-radius:6px;margin:10px 0;break-inside:avoid}
+.toc li{margin:3px 0}
+</style></head><body>
+<div class="cover"><img src="../web/public/logo-family.webp"><h1 style="margin-top:20px">MANA</h1><div class="sub">دستیار اجرایی زندگی و خانواده</div>
+<p style="font-size:15pt;margin-top:36px"><b>راهنمای کامل نصب، اجرا و استفاده</b></p><p>اجرا روی لپ‌تاپ ← استقرار آنلاین ← نصب روی گوشی‌ها</p><p class="sub" style="margin-top:50px">Our Little World — Four Hearts, One World</p></div>
+
+<h2>فهرست</h2><ol class="toc"><li>مرور کلی و حساب‌ها</li><li>گرفتن فایل‌های پروژه</li><li>اجرای کامل روی لپ‌تاپ (مرحله‌ی آزمایش)</li><li>فهرست آزمون پیش از خرید دامنه</li><li>تعریف دسترسی وحید</li><li>خرید دامنه و سرور، و استقرار آنلاین</li><li>نصب روی سه گوشی</li><li>صدا، میکروفون و اعلان‌ها</li><li>کارهای روزمره و نگهداری</li><li>عیب‌یابی</li><li>محدودیت‌ها و موارد آزمون‌نشده</li></ol>
+
+<h2>۱. مرور کلی و حساب‌ها</h2>
+<p>MANA یک برنامه‌ی فارسی (RTL) و قابل نصب روی گوشی (PWA) است: پنل مدیریت مانا، حساب مستقل سارینا و سامان با دستیار صوتی و اعلان، و حساب وحید با دسترسی‌هایی که مانا تعیین می‌کند. پایگاه داده PostgreSQL است و محدودیت دسترسی هم در سرور و هم در خود پایگاه داده اجرا می‌شود.</p>
+<table><tr><th>نام کاربری</th><th>نقش</th><th>چه می‌بیند</th></tr>
+<tr><td><code>mana</code></td><td>مدیر</td><td>همه‌چیز؛ تنها کسی که دسترسی‌ها، رمز بچه‌ها و MANA AI را مدیریت می‌کند</td></tr>
+<tr><td><code>vahid</code></td><td>بزرگسال</td><td>پیش‌فرض: هیچ‌چیز. مانا برای هر بخش تعیین می‌کند</td></tr>
+<tr><td><code>sarina</code></td><td>کودک</td><td>فقط برنامه، ستاره، جوایز، عکس‌های خودش</td></tr>
+<tr><td><code>saman</code></td><td>کودک</td><td>فقط مال خودش؛ رابط تصویری و صوتی</td></tr></table>
+
+<h2>۲. گرفتن فایل‌های پروژه</h2>
+<h3>راه الف — فایل ZIP</h3>
+<ol><li>فایل <code>MANA-v2.zip</code> را در <code>D:\Claude Project</code> بگذارید.</li><li>راست‌کلیک ← <b>Extract All</b>. پوشه‌ی <code>MANA</code> ساخته می‌شود.</li></ol>
+<h3>راه ب — GitHub (اگر زیپ باز نشد)</h3>
+<pre>git clone -b ccr-e1b3dc84-iv05g9 https://github.com/manamoghadam-coder/Sarina-Earth-Animation.git "D:\Claude Project\repo"</pre>
+<p>پروژه داخل پوشه‌ی <code>mana</code> است. یا در GitHub شاخه را انتخاب کنید و Code ← Download ZIP بزنید.</p>
+
+<h2>۳. اجرای کامل روی لپ‌تاپ</h2>
+<p>مرورگر آدرس <code>http://localhost:8080</code> را «امن» می‌داند؛ پس نصب PWA، میکروفون و اعلان درون‌برنامه‌ای روی خود لپ‌تاپ قابل آزمایش است.</p>
+<ol>
+<li>نصب <b>Docker Desktop</b> از docker.com. بعد از نصب یک‌بار ویندوز را ریستارت کنید و صبر کنید آیکون Docker «Running» شود (اگر خواست، WSL 2 را فعال کنید).</li>
+<li>پوشه‌ی <code>D:\Claude Project\MANA\deploy</code> را باز کنید.</li>
+<li>روی <b>start-local.bat</b> دوبار کلیک کنید. بار اول چند دقیقه طول می‌کشد (ساخت برنامه و پایگاه داده).</li>
+<li>در پایان، رمز حساب‌ها چاپ می‌شود. <b>همان‌جا یادداشت کنید</b>؛ فقط یک‌بار نشان داده می‌شود.</li>
+<li>مرورگر <code>http://localhost:8080</code> را باز می‌کند. با <code>mana</code> وارد شوید.</li></ol>
+<div class="note">برای آزمون حساب بچه‌ها از یک پنجره‌ی Incognito یا مرورگر دوم استفاده کنید تا نشست مانا نپرد.</div>
+<h3>روشن/خاموش کردن</h3>
+<pre>cd "D:\Claude Project\MANA\deploy"
+docker compose -f docker-compose.local.yml down        # خاموش (داده‌ها می‌مانند)
+docker compose -f docker-compose.local.yml up -d       # روشن دوباره
+docker compose -f docker-compose.local.yml logs -f mana  # مشاهده‌ی لاگ</pre>
+<div class="warn">فایل‌های اجرای محلی در محیط ساخت آزمایش نشده‌اند (Docker آنجا نبود). اگر خطا دیدید، متن خطا را برای اصلاح بفرستید.</div>
+
+<h2>۴. فهرست آزمون پیش از خرید دامنه</h2>
+<table><tr><th>#</th><th>آزمون</th><th>انتظار</th></tr>
+<tr><td>۱</td><td>ورود هر چهار حساب</td><td>هر کس فقط بخش خودش را می‌بیند</td></tr>
+<tr><td>۲</td><td>تنظیمات ← حساب‌ها و دسترسی‌ها (وحید)</td><td>تغییر سطح، فوراً در حساب وحید اعمال شود</td></tr>
+<tr><td>۳</td><td>خانواده ← برنامه: فعالیت برای سامان با ساعت ۵ دقیقه بعد</td><td>اعلان با صدا (برنامه باز باشد)</td></tr>
+<tr><td>۴</td><td>سامان: «انجام دادم» ← مانا: تأیید</td><td>ستاره اضافه شود، مدال اول</td></tr>
+<tr><td>۵</td><td>آیکون‌ها در حساب سامان را لمس کنید</td><td>نام و کاربرد خوانده شود</td></tr>
+<tr><td>۶</td><td>دکمه‌ی «دستیار من 🎙️» و فرمان «برنامه امروز من چیه؟»</td><td>برنامه خوانده شود</td></tr>
+<tr><td>۷</td><td>بارگذاری عکس واقعی بچه‌ها و «پروفایل»</td><td>آواتار و گالری نمایش داده شود؛ برای حساب دیگر نامرئی</td></tr>
+<tr><td>۸</td><td>مالی: درآمد، هزینه، قسط و «پرداخت»</td><td>سررسید یک ماه شمسی جلو برود</td></tr>
+<tr><td>۹</td><td>MANA AI: «فردا ساعت ۱۰ جلسه دارم.»</td><td>پیشنهاد ← تأیید ← ثبت در تقویم</td></tr>
+<tr><td>۱۰</td><td>تقویم ماهانه و هفتگی</td><td>تاریخ‌ها شمسی و درست</td></tr></table>
+<p>هرچه خوشتان نیامد یا خطا دید را یادداشت کنید تا قبل از خرید هاست اصلاح شود.</p>
+
+<h2>۵. تعریف دسترسی وحید</h2>
+<ol><li>با <code>mana</code> وارد شوید ← <b>تنظیمات ← حساب‌ها و دسترسی‌ها</b>.</li>
+<li>برای هر بخش یکی را انتخاب کنید: <b>بدون دسترسی</b> / <b>فقط مشاهده</b> / <b>مشاهده و ویرایش</b>.</li>
+<li>بخش‌ها: کارها و پروژه‌ها، تقویم، مالی (حساس)، اهداف و عادت‌ها، برنامه و پاداش کودکان، تصاویر کودکان.</li>
+<li>در همین‌جا می‌توانید رمز او را عوض کنید یا حسابش را غیرفعال کنید (فوراً خارج می‌شود).</li></ol>
+<div class="ok">وحید نمی‌تواند دسترسی خودش را بالا ببرد. MANA AI، مدیریت حساب‌ها و رمز بچه‌ها همیشه فقط برای مانا است. هر تغییر دسترسی در سابقه‌ی سیستم ثبت می‌شود.</div>
+
+<h2>۶. خرید دامنه و سرور، و استقرار آنلاین</h2>
+<p>این مرحله را بعد از پایان آزمون انجام دهید. اعلان وقتی برنامه بسته است، نصب روی گوشی و میکروفون روی گوشی فقط روی آدرس <code>https://</code> کار می‌کنند.</p>
+<h3>۶-۱ خرید (یک‌بار)</h3>
+<ul><li><b>دامنه</b> (مثلاً <code>bk-family.com</code>)، حدود ۱۰ تا ۱۵ دلار در سال، از Namecheap، Porkbun یا مشابه.</li>
+<li><b>سرور مجازی (VPS)</b>: اوبونتو ۲۴.۰۴، حداقل ۲ گیگ رم و ۲۰ گیگ دیسک (Hetzner، DigitalOcean، Contabo). مکان: اروپا.</li>
+<li>در DNS دامنه یک رکورد <code>A</code> بسازید: نام <code>@</code> ← آی‌پی سرور (تا ۳۰ دقیقه طول می‌کشد).</li></ul>
+<h3>۶-۲ آماده‌سازی سرور</h3>
+<p>از PowerShell: <code>ssh root@IP_SERVER</code> و سپس:</p>
+<pre>apt update && apt install -y git docker.io docker-compose-v2
+git clone -b ccr-e1b3dc84-iv05g9 https://github.com/manamoghadam-coder/Sarina-Earth-Animation.git
+cd Sarina-Earth-Animation/mana/deploy</pre>
+<p>مخزن خصوصی است؛ هنگام clone نام کاربری GitHub و یک <b>Personal Access Token</b> با دسترسی خواندن می‌خواهد.</p>
+<h3>۶-۳ اسرار</h3>
+<pre>cp env.example .env
+openssl rand -base64 24      # سه بار: PG_ADMIN_PASSWORD, OWNER_DB_PASSWORD, APP_DB_PASSWORD
+docker run --rm node:22-slim npx -y web-push generate-vapid-keys   # کلیدهای اعلان
+nano .env                    # DOMAIN، رمزها، VAPID_*، VAPID_SUBJECT=mailto:ایمیل-شما</pre>
+<div class="warn">فایل <code>.env</code> را به هیچ‌کس ندهید و رمزها را در چت ننویسید.</div>
+<h3>۶-۴ اجرا</h3>
+<pre>docker compose up -d --build
+docker compose logs -f mana      # باید «MANA listening on :8080» ببینید (Ctrl+C)
+docker compose exec mana npx tsx scripts/seed.ts   # ساخت حساب‌ها؛ رمزها را یادداشت کنید</pre>
+<p>حالا <code>https://دامنه‌ی-شما</code> باید صفحه‌ی ورود با لوگوی خانوادگی را نشان دهد. گواهی HTTPS را Caddy خودکار می‌گیرد.</p>
+<div class="note">بعد از استقرار: داده‌ی «نمونه» را حذف و رمزها را عوض کنید. به‌روزرسانی: <code>git pull && docker compose up -d --build</code>.</div>
+
+<h2>۷. نصب روی سه گوشی</h2>
+<h3>اندروید (Chrome)</h3>
+<ol><li>آدرس سایت را در Chrome باز کنید.</li><li>با حساب همان فرد وارد شوید: گوشی مانا ← <code>mana</code>، وحید ← <code>vahid</code>، سارینا ← <code>sarina</code>، سامان ← <code>saman</code>.</li>
+<li>منوی ⋮ ← <b>Install app</b> (افزودن به صفحه‌ی اصلی).</li>
+<li>از روی آیکون برنامه را باز کنید؛ <b>روشن کردن اعلان روی این دستگاه</b> را بزنید و Allow کنید.</li>
+<li>تنظیمات گوشی ← Apps ← Chrome ← Battery ← <b>Unrestricted</b>.</li></ol>
+<h3>آیفون</h3>
+<p>iOS ۱۶.۴ یا بالاتر؛ فقط با <b>Safari ← Share ← Add to Home Screen</b> و باز کردن از آیکون. تشخیص گفتار فارسی روی آیفون محدودتر است.</p>
+<div class="ok">رمز هر کودک را از «خانواده ← انتخاب کودک ← اعلان‌ها و تنظیمات ← رمز عبور» می‌توانید ساده‌تر (حداقل ۸ نویسه) کنید.</div>
+
+<h2>۸. صدا، میکروفون و اعلان‌ها</h2>
+<h3>صدای فارسی</h3>
+<p>تنظیمات گوشی ← Google ← <b>Text-to-speech output</b> ← موتور Google ← زبان <b>فارسی</b> و دانلود داده‌ی صدا. در MANA «🔈 آزمایش صدا» را بزنید. اگر صدایی نیامد، برنامه بنر خطا نشان می‌دهد.</p>
+<h3>سه قابلیت اصلی حساب سامان</h3>
+<table><tr><th>قابلیت</th><th>طرز استفاده</th></tr>
+<tr><td>شنیدن با لمس آیکون</td><td>روی هر کاشی بزنید یا دکمه‌ی 🔊 کوچک آن؛ نام و کاربرد خوانده می‌شود</td></tr>
+<tr><td>صحبت با دستیار</td><td>دکمه‌ی ثابت <b>«دستیار من 🎙️»</b> پایین صفحه ← «بزن و حرف بزن». نمونه: «برنامه امروز من چیه؟»، «الان باید چیکار کنم؟»، «تکالیفم رو انجام دادم»، «قصه برام بخون»، «چند تا ستاره دارم؟». ثبت تغییر فقط پس از پاسخ «بله»</td></tr>
+<tr><td>یادآوری صوتی</td><td>اعلان فعالیت با صدا خوانده می‌شود (وقتی برنامه باز است). وقتی بسته است، اعلان پوش با صدای خود گوشی می‌آید</td></tr></table>
+<p>«🔊 برایم بخوان» در هر صفحه محتوا را به‌ترتیب می‌خواند؛ توقف، ادامه، تکرار و سرعت دارد. اگر مرورگر تشخیص گفتار ندارد، دکمه‌های تصویری و تایپ جایگزین‌اند.</p>
+<div class="note"><b>حریم خصوصی:</b> MANA صدا ضبط یا ذخیره نمی‌کند و میکروفون فقط با لمس دکمه روشن می‌شود. در Chrome اندروید، تشخیص گفتار توسط سرویس Google انجام می‌شود. مانا می‌تواند میکروفون را برای هر کودک خاموش کند.</div>
+<h3>اعلان‌ها</h3>
+<ul><li>تعریف در «خانواده ← برنامه»: ساعت شروع، متن اختصاصی، آفست‌ها (مثل <code>-15,0,10</code>: ۱۵ دقیقه قبل، شروع، ۱۰ دقیقه بعد اگر انجام نشده).</li>
+<li>«خانواده ← اعلان‌ها و تنظیمات»: فعال/غیرفعال، ساعت سکوت، تاریخچه، <b>ارسال اعلان آزمایشی</b>.</li>
+<li>وضعیت ارسال در تاریخچه: <code>sent:1</code> = پوش رفت؛ <code>no_subscription</code> = روی آن گوشی اعلان روشن نشده؛ <code>no_vapid_keys</code> = کلیدها در <code>.env</code> نیست.</li></ul>
+
+<h2>۹. کارهای روزمره و نگهداری</h2>
+<ul><li><b>هر روز:</b> داشبورد ← تأیید فعالیت‌های بچه‌ها در «خانواده ← تأییدها» ← MANA AI برای ثبت سریع.</li>
+<li><b>برنامه‌ی بچه‌ها:</b> ساعت‌های نمونه‌ی مطالعه، سنتور، تکالیف و زبان فرضی‌اند و باید اصلاح شوند. «شاهنامه‌خوانی» ساعت ندارد و تا ساعت نگذارید اعلان نمی‌دهد.</li>
+<li><b>پشتیبان:</b> اسکریپت <code>server/scripts/backup.sh</code> (دیتابیس و عکس‌ها). زمان‌بندی (cron) و نگهداری بیرون از سرور با شماست.</li>
+<li><b>افزودن حساب بزرگسال دیگر:</b> <code>docker compose exec mana npx tsx scripts/add-member.ts نام‌کاربری "نام"</code></li>
+<li><b>قفل ورود:</b> بعد از ۵ رمز اشتباه، ۱۰ دقیقه قفل می‌شود.</li></ul>
+
+<h2>۱۰. عیب‌یابی</h2>
+<table><tr><th>مشکل</th><th>راه‌حل</th></tr>
+<tr><td>ZIP باز نمی‌شود</td><td>از GitHub دانلود کنید (بخش ۲-ب)</td></tr>
+<tr><td>start-local خطا می‌دهد</td><td>Docker Desktop باز و «Running» باشد؛ ویندوز را بعد از نصب ریستارت کنید؛ WSL 2 فعال باشد</td></tr>
+<tr><td>صفحه‌ی ورود باز نمی‌شود</td><td><code>docker compose -f docker-compose.local.yml logs mana</code> را بخوانید</td></tr>
+<tr><td>صدا نمی‌آید</td><td>صدای فارسی گوشی را نصب کنید؛ «آزمایش صدا»؛ صدای رسانه بالا باشد</td></tr>
+<tr><td>میکروفون کار نمی‌کند</td><td>باید HTTPS (یا localhost) باشد؛ Allow در مرورگر؛ اینترنت لازم است؛ Chrome توصیه می‌شود</td></tr>
+<tr><td>اعلان پوش نمی‌رسد</td><td>تاریخچه‌ی اعلان‌ها را ببینید (بخش ۸)؛ باتری Unrestricted؛ اعلان روی آن گوشی روشن باشد</td></tr>
+<tr><td>ورود قفل شده</td><td>۱۰ دقیقه صبر کنید یا مانا رمز را عوض کند</td></tr>
+<tr><td>وحید بخشی را نمی‌بیند</td><td>دسترسی آن بخش را در تنظیمات مانا بررسی کنید</td></tr></table>
+<div class="warn"><b>ایران:</b> اعلان پوش اندروید از سرویس Google (FCM) می‌گذرد و ممکن است بدون فیلترشکن نرسد؛ اعلان درون‌برنامه‌ای در هر حال کار می‌کند. این را همان روز اول آزمایش کنید. دسترسی به خود سایت به مکان سرور و فیلترینگ بستگی دارد.</div>
+
+<h2>۱۱. محدودیت‌ها و موارد آزمون‌نشده</h2>
+<ul><li><b>آزمون‌شده در محیط ساخت:</b> ۱۶ تست خودکار امنیت/دسترسی/ستاره/مالی/AI/اعلان و سناریوی مرورگر (موبایل، تبلت، دسکتاپ) با گفتار شبیه‌سازی‌شده.</li>
+<li><b>آزمون‌نشده:</b> اجرای Docker (محلی و سرور)، اعلان پوش واقعی، صدای/تشخیص گفتار واقعی روی گوشی اندروید، مسیر Claude در MANA AI (نیاز به کلید).</li>
+<li><b>ساخته‌نشده:</b> پیوست فایل برای کارها؛ افزودن کاربر از رابط (با اسکریپت انجام می‌شود)؛ مناسبت‌های رسمی تقویم.</li>
+<li>حالت کودکانه‌ی سامان بر اساس نام کاربری <code>saman</code> تعیین می‌شود.</li>
+<li>برای دسترسی «فقط مشاهده»، دکمه‌های افزودن پنهان نمی‌شوند؛ بنر نشان داده می‌شود و سرور نوشتن را رد می‌کند.</li></ul>
+<p class="sub" style="text-align:center;margin-top:24px">مستندات تکمیلی داخل پوشه‌ی <code>docs</code>: ARCHITECTURE، SECURITY، API، USER_GUIDE، STATUS</p>
+</body></html>
