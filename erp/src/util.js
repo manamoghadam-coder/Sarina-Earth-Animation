@@ -2,6 +2,8 @@ export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 export const bad = (m) => new HttpError(400, m);
+// شناسه‌ی معتبر دیتابیس (۱ تا 2^31-1)؛ غیر از آن null — از خطای نوع عددی در PostgreSQL جلوگیری می‌کند
+export const toId = (v) => { const n = typeof v === 'string' && /^\d{1,10}$/.test(v) ? Number(v) : v; return Number.isInteger(n) && n > 0 && n <= 2147483647 ? n : null; };
 export const today = () => new Date().toISOString().slice(0, 10);
 export function isoDate(s) {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;

@@ -1,5 +1,5 @@
 // حسابداری دوطرفه: ثبت سند، دفتر کل، گزارش‌های مالی
-import { HttpError, bad, isoDate, today } from './util.js';
+import { HttpError, bad, isoDate, today, toId } from './util.js';
 
 // نوع حساب: asset/expense طبیعتاً بدهکار؛ liability/equity/revenue طبیعتاً بستانکار
 export const CHART = [
@@ -132,7 +132,8 @@ export async function trialBalance(ctx, p) {
 }
 
 export async function ledger(ctx, p) {
-  const acc = (await ctx.db.get('SELECT id,code,name,type FROM e_accounts WHERE id=? AND company_id=?', Number(p.account), ctx.companyId));
+  const accId = toId(p.account);
+  const acc = accId && (await ctx.db.get('SELECT id,code,name,type FROM e_accounts WHERE id=? AND company_id=?', accId, ctx.companyId));
   if (!acc) throw bad('حساب را انتخاب کنید');
   const [from, to] = rng(p);
   const opening = (await ctx.db.get('SELECT COALESCE(SUM(debit-credit),0) s FROM gl_lines WHERE company_id=? AND account_id=? AND date < ?', ctx.companyId, acc.id, from)).s;
@@ -184,7 +185,8 @@ export async function partyReport(ctx, p) {
     const total = r2(rows.reduce((s, r) => s + r.balance, 0));
     return { type, parties: rows, total, control: r2(sign * ctrl), unassigned: r2(sign * ctrl - total) };
   }
-  const party = (await ctx.db.get(`SELECT id,name FROM ${tbl} WHERE id=? AND company_id=?`, Number(p.party), ctx.companyId));
+  const pid = toId(p.party);
+  const party = pid && (await ctx.db.get(`SELECT id,name FROM ${tbl} WHERE id=? AND company_id=?`, pid, ctx.companyId));
   if (!party) throw bad('طرف حساب یافت نشد');
   const [from, to] = rng(p);
   const base = `FROM gl_lines g JOIN e_accounts a ON a.id=g.account_id AND a.sys_key IN ('ar','ap') JOIN e_journal_entries e ON e.id=g.entry_id WHERE g.company_id=? AND g.party_type=? AND g.party_id=?`;

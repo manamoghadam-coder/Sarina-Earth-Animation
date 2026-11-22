@@ -24,8 +24,10 @@ export function initSecret(dir) {
   else { SECRET = crypto.randomBytes(32).toString('hex'); fs.writeFileSync(f, SECRET, { mode: 0o600 }); }
 }
 const b64 = (b) => Buffer.from(b).toString('base64url');
-export function signToken(uid, ttlSec = 12 * 3600) {
-  const p = b64(JSON.stringify({ uid, exp: Math.floor(Date.now() / 1000) + ttlSec }));
+// fp = اثر انگشت هش گذرواژه؛ با تغییر گذرواژه همه‌ی نشست‌های قبلی باطل می‌شوند
+export const passwordFingerprint = (hash) => crypto.createHash('sha256').update(String(hash)).digest('base64url').slice(0, 16);
+export function signToken(uid, fp, ttlSec = 8 * 3600) {
+  const p = b64(JSON.stringify({ uid, fp, exp: Math.floor(Date.now() / 1000) + ttlSec }));
   const sig = crypto.createHmac('sha256', SECRET).update(p).digest('base64url');
   return `${p}.${sig}`;
 }

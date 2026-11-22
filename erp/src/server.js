@@ -5,9 +5,10 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb, migrate, schemaVersion, setSchemaVersion, allModuleKeys } from './db.js';
 import { ENTITIES, MODULES, publicMeta, customerBalance } from './entities.js';
-import { initSecret, signToken, readToken, verifyPassword, hashPassword, can, ROLES } from './auth.js';
+import { initSecret, signToken, readToken, verifyPassword, hashPassword, passwordFingerprint, can, ROLES } from './auth.js';
 import * as engine from './engine.js';
-import { HttpError, bad, isoDate } from './util.js';
+import { hiddenFields } from './engine.js';
+import { HttpError, bad, isoDate, toId } from './util.js';
 import { setFilesDir, saveFile, filePath, deleteFile, ALLOWED } from './files.js';
 import * as ACC from './accounting.js';
 import { mrp, capacity, pmRows, pmDue } from './industry.js';
@@ -15,10 +16,18 @@ import { mrp, capacity, pmRows, pmDue } from './industry.js';
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dir, '..', 'public');
 const COOKIE = 'erp_session';
+const getDef = (k) => (typeof k === 'string' && Object.hasOwn(ENTITIES, k) ? ENTITIES[k] : undefined); // جلوگیری از کلیدهایی مثل __proto__
+const TRUST_PROXY = Number(process.env.ERP_TRUST_PROXY) || 0;   // تعداد پراکسی‌های مورد اعتماد جلوی برنامه (مثلاً 1 برای Caddy/Nginx)
+const FORCE_SECURE = process.env.ERP_COOKIE_SECURE === '1';
+const clientIp = (req) => {
+  if (TRUST_PROXY) { const parts = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean); if (parts.length) return parts[Math.max(0, parts.length - TRUST_PROXY)]; }
+  return req.socket.remoteAddress || '?';
+};
+const isSecure = (req) => FORCE_SECURE || !!req.socket.encrypted || (TRUST_PROXY > 0 && req.headers['x-forwarded-proto'] === 'https');
 
 export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
   dataDir = dataDir || process.env.ERP_DATA_DIR || path.join(__dir, '..', 'data');
-  fs.mkdirSync(dataDir, { recursive: true });
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   initSecret(dataDir);
   setFilesDir(process.env.ERP_FILES_DIR || path.join(dataDir, 'files'));
   const MAX_UPLOAD = (Number(process.env.ERP_MAX_UPLOAD_MB) || 10) * 1024 * 1024;
@@ -27,14 +36,27 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
   await upgrade(db);
   await bootstrapSuperadmin(db, quiet);
 
-  const fails = new Map(); // محدودسازی تلاش ورود
-  const throttleKey = (req, u) => `${req.socket.remoteAddress}|${String(u).toLowerCase()}`;
+  // محدودسازی: تلاش ناموفق ورود (به‌ازای IP+کاربر و به‌ازای IP) و نرخ کل درخواست‌ها به‌ازای IP
+  const fails = new Map(), hits = new Map();
+  const DUMMY_HASH = hashPassword(crypto.randomBytes(8).toString('hex')); // یکسان‌سازی زمان پاسخ برای کاربر ناموجود
+  const prune = setInterval(() => { const now = Date.now(); for (const [k, v] of fails) if (now - v.t > 5 * 60000) fails.delete(k); for (const [k, v] of hits) if (now - v.t > 60000) hits.delete(k); }, 60000);
+  prune.unref();
+  const RATE = Number(process.env.ERP_RATE_PER_MIN) || 600;
+  const rateLimited = (ip) => { const now = Date.now(); let h = hits.get(ip); if (!h || now - h.t > 60000) { h = { n: 0, t: now }; hits.set(ip, h); } return ++h.n > RATE; };
+  const lockedOut = (k, max) => { const f = fails.get(k); return !!f && f.n >= max && Date.now() - f.t < 5 * 60000; };
+  const noteFail = (k) => { const f = fails.get(k); fails.set(k, { n: (f && Date.now() - f.t < 5 * 60000 ? f.n : 0) + 1, t: Date.now() }); };
 
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, 'http://x');
+    let url;
+    try { url = new URL(req.url, 'http://x'); } catch { res.writeHead(400); return res.end(); }
     try {
-      secHeaders(res);
+      secHeaders(res, isSecure(req));
+      if (url.pathname === '/api/health') { // بدون احراز هویت؛ فقط سلامت سرویس و دیتابیس (برای مانیتورینگ/Docker)
+        await db.get('SELECT 1 n');
+        return json(res, 200, { ok: true });
+      }
       if (url.pathname.startsWith('/api/')) {
+        if (rateLimited(clientIp(req))) throw new HttpError(429, 'تعداد درخواست‌ها زیاد است؛ کمی بعد دوباره تلاش کنید');
         const mutating = req.method !== 'GET' && req.method !== 'HEAD';
         if (mutating && req.headers['x-erp'] !== '1') throw new HttpError(403, 'درخواست نامعتبر');
         const isUpload = req.method === 'POST' && url.pathname === '/api/attachments';
@@ -56,25 +78,22 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
     const method = req.method;
 
     if (route[0] === 'login' && method === 'POST') {
-      const k = throttleKey(req, body.username);
-      const f = fails.get(k);
-      if (f && f.n >= 8 && Date.now() - f.t < 5 * 60000) throw new HttpError(429, 'تلاش‌های ناموفق زیاد؛ چند دقیقه بعد دوباره امتحان کنید');
-      const u = (await db.get('SELECT * FROM e_users WHERE username=?', String(body.username || '')));
-      const co = u?.company_id ? (await db.get('SELECT active FROM companies WHERE id=?', u.company_id)) : null;
-      const ok = u && verifyPassword(String(body.password || ''), u.password) && u.active && (!u.company_id || co?.active);
-      if (!ok) {
-        fails.set(k, { n: (f?.n || 0) + 1, t: Date.now() });
-        if (!u) verifyPassword('x', 's1$00$00'); // یکسان‌سازی زمان پاسخ
-        throw new HttpError(401, 'نام کاربری یا گذرواژه نادرست است');
-      }
-      fails.delete(k);
-      const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
-      res.setHeader('Set-Cookie', `${COOKIE}=${signToken(u.id)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${secure}`);
+      if (typeof body.username !== 'string' || typeof body.password !== 'string') throw bad('نام کاربری و گذرواژه باید رشته باشند');
+      const ip = clientIp(req), uname = body.username.slice(0, 64), pass = body.password.slice(0, 200);
+      const kUser = `${ip}|${uname.toLowerCase()}`, kIp = `ip|${ip}`;
+      if (lockedOut(kUser, 8) || lockedOut(kIp, 30)) throw new HttpError(429, 'تلاش‌های ناموفق زیاد؛ چند دقیقه بعد دوباره امتحان کنید');
+      const u = await db.get('SELECT * FROM e_users WHERE username=?', uname);
+      const co = u?.company_id ? await db.get('SELECT active FROM companies WHERE id=?', u.company_id) : null;
+      const pwOk = verifyPassword(pass, u ? u.password : DUMMY_HASH); // همیشه یک بار هش محاسبه می‌شود
+      const ok = u && pwOk && u.active && (!u.company_id || co?.active);
+      if (!ok) { noteFail(kUser); noteFail(kIp); throw new HttpError(401, 'نام کاربری یا گذرواژه نادرست است'); }
+      fails.delete(kUser);
+      res.setHeader('Set-Cookie', sessionCookie(signToken(u.id, passwordFingerprint(u.password)), req));
       await engine.audit({ db, companyId: u.company_id, user: { id: u.id, username: u.username } }, 'auth', u.id, 'login');
       return json(res, 200, { ok: true });
     }
     if (route[0] === 'logout' && method === 'POST') {
-      res.setHeader('Set-Cookie', `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);
+      res.setHeader('Set-Cookie', sessionCookie('', req, 0));
       return json(res, 200, { ok: true });
     }
 
@@ -85,8 +104,12 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
     if (route[0] === 'password' && method === 'POST') {
       const row = (await db.get('SELECT password FROM e_users WHERE id=?', user.id));
       if (!verifyPassword(String(body.current || ''), row.password)) throw new HttpError(400, 'گذرواژه فعلی نادرست است');
-      if (typeof body.next !== 'string' || body.next.length < 8) throw bad('گذرواژه جدید حداقل ۸ نویسه باشد');
-      (await db.run('UPDATE e_users SET password=? WHERE id=?', hashPassword(body.next), user.id));
+      if (typeof body.next !== 'string' || body.next.length < 8 || body.next.length > 200) throw bad('گذرواژه جدید باید ۸ تا ۲۰۰ نویسه باشد');
+      if (body.next === body.current) throw bad('گذرواژه جدید باید با گذرواژه فعلی متفاوت باشد');
+      const newHash = hashPassword(body.next);
+      await db.run('UPDATE e_users SET password=? WHERE id=?', newHash, user.id);
+      res.setHeader('Set-Cookie', sessionCookie(signToken(user.id, passwordFingerprint(newHash)), req)); // این نشست ادامه می‌یابد؛ بقیه‌ی نشست‌ها باطل می‌شوند
+      await engine.audit(ctx, 'auth', user.id, 'password-change');
       return json(res, 200, { ok: true });
     }
 
@@ -112,7 +135,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
         return json(res, 201, { id: r });
       }
       if (method === 'PUT' && route[1]) {
-        const c = (await db.get('SELECT * FROM companies WHERE id=?', Number(route[1])));
+        const c = (toId(route[1]) && (await db.get('SELECT * FROM companies WHERE id=?', toId(route[1]))));
         if (!c) throw new HttpError(404, 'شرکت یافت نشد');
         (await db.run('UPDATE companies SET name=?, currency=?, modules=?, active=? WHERE id=?', String(body.name ?? c.name).trim() || c.name, String(body.currency ?? c.currency).slice(0, 20),
           body.modules ? JSON.stringify(validModules(body.modules)) : c.modules, body.active === undefined ? c.active : (body.active ? 1 : 0), c.id));
@@ -131,7 +154,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
     if (!ctx.companyId) throw new HttpError(400, 'ابتدا یک شرکت را انتخاب کنید');
 
     if (route[0] === 'entities' && route[1]) {
-      const def = ENTITIES[route[1]];
+      const def = getDef(route[1]);
       if (!def) throw new HttpError(404, 'یافت نشد');
       requireModule(ctx, def);
       const id = route[2]; const sub = route[3];
@@ -153,7 +176,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       return json(res, 200, { created: made.length });
     }
     if (route[0] === 'export' && route[1] && method === 'GET') {
-      const def = ENTITIES[route[1]];
+      const def = getDef(route[1]);
       if (!def || def.key === 'users') throw new HttpError(404, 'یافت نشد');
       requireModule(ctx, def); need(ctx, def, 'v');
       res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${def.key}.csv"` });
@@ -172,39 +195,42 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
   // ─── پیوست فایل ───
   async function attachments(ctx, route, method, url, body, res) {
     const user = ctx.user, q = url.searchParams;
+    const recId = toId(q.get('id'));
     const target = async (entity, id, acts) => {
-      const def = ENTITIES[entity];
+      const def = getDef(entity);
       if (!def || def.key === 'users') throw new HttpError(404, 'یافت نشد');
       requireModule(ctx, def);
-      if (!acts.some((a) => can(user.role, def.module, a))) throw new HttpError(403, 'دسترسی لازم را ندارید');
+      const mod = def.attachModule || def.module; // پیوست‌های کارمند (قرارداد، مدارک هویتی) مثل حقوق حساس‌اند
+      if (!acts.some((a) => can(user.role, mod, a))) throw new HttpError(403, 'دسترسی لازم را ندارید');
       const rec = await engine.getRow(ctx, def, id);
       if (!rec) throw new HttpError(404, 'رکورد یافت نشد');
       return def;
     };
     if (!route[1] && method === 'GET') {
       await target(q.get('entity'), q.get('id'), ['v']);
-      return json(res, 200, await ctx.db.all('SELECT id,name,mime,size,created_by_name,created_at FROM attachments WHERE company_id=? AND entity=? AND rec_id=? ORDER BY id', ctx.companyId, q.get('entity'), Number(q.get('id'))));
+      return json(res, 200, await ctx.db.all('SELECT id,name,mime,size,created_by_name,created_at FROM attachments WHERE company_id=? AND entity=? AND rec_id=? ORDER BY id', ctx.companyId, q.get('entity'), recId));
     }
     if (!route[1] && method === 'POST') {
       const def = await target(q.get('entity'), q.get('id'), ['c', 'e']);
       let name = String(q.get('name') || '').replace(/[\/\\\u0000-\u001f]/g, '_').trim().slice(-150);
       const ext = (name.split('.').pop() || '').toLowerCase();
-      if (!name || !ALLOWED[ext] || !name.includes('.')) throw bad(`نوع فایل مجاز نیست (مجاز: ${Object.keys(ALLOWED).join('، ')})`);
+      if (!name || !ALLOWED[ext] || name.lastIndexOf('.') < 1) throw bad(`نوع فایل مجاز نیست (مجاز: ${Object.keys(ALLOWED).join('، ')})`);
       if (!Buffer.isBuffer(body) || !body.length) throw bad('فایل خالی است');
-      const count = (await ctx.db.get('SELECT COUNT(*) n FROM attachments WHERE company_id=? AND entity=? AND rec_id=?', ctx.companyId, def.key, Number(q.get('id')))).n;
+      const count = (await ctx.db.get('SELECT COUNT(*) n FROM attachments WHERE company_id=? AND entity=? AND rec_id=?', ctx.companyId, def.key, recId)).n;
       if (count >= 25) throw new HttpError(409, 'حداکثر ۲۵ پیوست برای هر رکورد مجاز است');
       const stored = saveFile(ctx.companyId, body);
       try {
         const id = await tx(ctx, async (c) => {
           const id = await c.db.insert('INSERT INTO attachments (company_id,entity,rec_id,name,mime,size,sha256,stored,created_by,created_by_name) VALUES (?,?,?,?,?,?,?,?,?,?)',
-            ctx.companyId, def.key, Number(q.get('id')), name, ALLOWED[ext], body.length, crypto.createHash('sha256').update(body).digest('hex'), stored, user.id, user.name);
-          await engine.audit(c, def.key, Number(q.get('id')), 'attach', name);
+            ctx.companyId, def.key, recId, name, ALLOWED[ext], body.length, crypto.createHash('sha256').update(body).digest('hex'), stored, user.id, user.name);
+          await engine.audit(c, def.key, recId, 'attach', name);
           return id;
         });
         return json(res, 201, { id, name, size: body.length });
       } catch (e) { deleteFile(stored); throw e; }
     }
-    const att = route[1] && await ctx.db.get('SELECT * FROM attachments WHERE id=? AND company_id=?', Number(route[1]), ctx.companyId);
+    const attId = toId(route[1]);
+    const att = attId && await ctx.db.get('SELECT * FROM attachments WHERE id=? AND company_id=?', attId, ctx.companyId);
     if (!att) throw new HttpError(404, 'پیوست یافت نشد');
     if (method === 'GET') {
       await target(att.entity, att.rec_id, ['v']);
@@ -224,8 +250,9 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
   async function authenticate(req) {
     const cookie = Object.fromEntries((req.headers.cookie || '').split(';').map((c) => c.trim().split('=')).filter((p) => p[0]));
     const tok = readToken(cookie[COOKIE]);
-    const u = tok && (await db.get('SELECT id,company_id,username,name,role,active FROM e_users WHERE id=?', tok.uid));
-    if (!u || !u.active) throw new HttpError(401, 'نشست منقضی شده است');
+    const u = tok && (await db.get('SELECT id,company_id,username,name,role,active,password FROM e_users WHERE id=?', tok.uid));
+    if (!u || !u.active || tok.fp !== passwordFingerprint(u.password)) throw new HttpError(401, 'نشست منقضی شده است');
+    delete u.password;
     let companyId = u.company_id;
     if (u.role === 'superadmin') {
       const h = parseInt(req.headers['x-company']);
@@ -251,7 +278,7 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
       company: ctx.company ? { id: ctx.company.id, name: ctx.company.name, currency: ctx.company.currency, lock_date: ctx.company.lock_date } : null,
       modules, perms, isSuper: u.role === 'superadmin',
       allModules: Object.entries(MODULES).filter(([k]) => k !== 'admin').map(([key, v]) => ({ key, title: v.title })),
-      meta: Object.fromEntries(Object.values(ENTITIES).map((d) => [d.key, publicMeta(d)])),
+      meta: Object.fromEntries(Object.values(ENTITIES).map((d) => [d.key, publicMeta(d, hiddenFields(ctx, d))])),
     };
   }
 
@@ -340,7 +367,9 @@ export async function createApp({ dataDir, quiet, databaseUrl } = {}) {
     throw new HttpError(404, 'گزارش یافت نشد');
   }
 
-  return { server, db };
+  server.headersTimeout = 30_000; server.requestTimeout = 120_000; server.keepAliveTimeout = 5_000;
+  const close = async () => { clearInterval(prune); await new Promise((r) => server.close(r)); await db.close(); };
+  return { server, db, close };
 }
 
 async function upgrade(db) {
@@ -365,16 +394,28 @@ function validModules(m) {
 
 async function bootstrapSuperadmin(db, quiet) {
   if ((await db.get('SELECT 1 FROM e_users LIMIT 1'))) return;
-  const pw = process.env.ERP_SUPERADMIN_PASSWORD || crypto.randomBytes(9).toString('base64url');
+  const fromEnv = !!process.env.ERP_SUPERADMIN_PASSWORD;
+  const pw = process.env.ERP_SUPERADMIN_PASSWORD || crypto.randomBytes(12).toString('base64url');
+  if (fromEnv && pw.length < 10) throw new Error('ERP_SUPERADMIN_PASSWORD باید حداقل ۱۰ نویسه باشد');
   (await db.run(`INSERT INTO e_users (company_id,username,name,role,password,active) VALUES (NULL,'superadmin','مدیر کل سامانه','superadmin',?,1)`, hashPassword(pw)));
-  if (!quiet) console.log(`\n  حساب مدیر کل ایجاد شد:\n    نام کاربری: superadmin\n    گذرواژه:    ${pw}\n  (آن را یادداشت و پس از ورود تغییر دهید)\n`);
+  if (!quiet) { // گذرواژه‌ای که از env آمده هرگز در لاگ چاپ نمی‌شود
+    if (fromEnv) console.log('\n  حساب مدیر کل (superadmin) با گذرواژه‌ی ERP_SUPERADMIN_PASSWORD ساخته شد.\n');
+    else console.log(`\n  حساب مدیر کل ایجاد شد:\n    نام کاربری: superadmin\n    گذرواژه:    ${pw}\n  (آن را یادداشت و پس از ورود تغییر دهید)\n`);
+  }
 }
 
-function secHeaders(res) {
+function secHeaders(res, secure) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'");
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'");
+  if (secure) res.setHeader('Strict-Transport-Security', 'max-age=15552000; includeSubDomains');
+}
+function sessionCookie(value, req, maxAge = 8 * 3600) {
+  return `${COOKIE}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${isSecure(req) ? '; Secure' : ''}`;
 }
 function json(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -390,11 +431,12 @@ function readRaw(req, max) {
 }
 function readJson(req) {
   return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
-    req.on('data', (c) => { size += c.length; if (size > 1_000_000) { reject(new HttpError(413, 'حجم درخواست زیاد است')); req.destroy(); } else chunks.push(c); });
+    const MAX = 1_000_000; let size = 0, tooBig = false; const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > MAX) { tooBig = true; chunks.length = 0; if (size > MAX * 8) req.destroy(); } else if (!tooBig) chunks.push(c); });
     req.on('end', () => {
+      if (tooBig) return reject(new HttpError(413, 'حجم درخواست زیاد است'));
       if (!chunks.length) return resolve({});
-      try { const v = JSON.parse(Buffer.concat(chunks).toString()); resolve(v && typeof v === 'object' ? v : {}); }
+      try { const v = JSON.parse(Buffer.concat(chunks).toString()); resolve(v && typeof v === 'object' && !Array.isArray(v) ? v : {}); }
       catch { reject(bad('JSON نامعتبر')); }
     });
     req.on('error', reject);
@@ -402,7 +444,9 @@ function readJson(req) {
 }
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' };
 function serveStatic(req, res, url) {
-  let p = decodeURIComponent(url.pathname);
+  let p;
+  try { p = decodeURIComponent(url.pathname); } catch { res.writeHead(400); return res.end(); }
+  if (p.includes('\0')) { res.writeHead(400); return res.end(); }
   if (p === '/') p = '/index.html';
   const file = path.normalize(path.join(PUBLIC, p));
   if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
@@ -413,7 +457,13 @@ function serveStatic(req, res, url) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { server } = await createApp();
+  const { server, close } = await createApp();
+  let stopping = false;
+  for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, async () => { // توقف تمیز: درخواست‌های در حال اجرا تمام و دیتابیس بسته می‌شود
+    if (stopping) return; stopping = true;
+    setTimeout(() => process.exit(1), 10_000).unref();
+    try { await close(); } finally { process.exit(0); }
+  });
   const port = Number(process.env.PORT) || 3000;
   server.listen(port, process.env.HOST || '0.0.0.0', () => console.log(`  ERP در حال اجرا: http://localhost:${port}`));
 }

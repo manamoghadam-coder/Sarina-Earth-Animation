@@ -1,0 +1,20 @@
+# HTTPS خودکار (Let's Encrypt) برای دامنه‌ی واقعی؛ برای آزمایش محلی ERP_DOMAIN=localhost (گواهی داخلی Caddy)
+{$ERP_DOMAIN:localhost} {
+	encode zstd gzip
+
+	# حجم بدنه: پیوست‌ها تا ۱۰ مگابایت
+	request_body {
+		max_size 12MB
+	}
+
+	# Caddy هدر X-Forwarded-For ارسالی کلاینت را نادیده می‌گیرد و آدرس واقعی را می‌نویسد (با ERP_TRUST_PROXY=1)
+	reverse_proxy app:3000 {
+		health_uri /api/health
+		health_interval 30s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

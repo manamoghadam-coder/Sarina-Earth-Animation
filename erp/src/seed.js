@@ -12,7 +12,7 @@ import { g2j } from './util.js';
 export async function seedDemo(db) {
   const exists = (await db.get(`SELECT id FROM companies WHERE name='شرکت نمونه'`));
   if (exists) return exists.id;
-  const sys = { id: 0, username: 'seed' };
+  const sys = { id: 0, username: 'seed', role: 'superadmin' };
   return db.tx(async (db) => {
     const cid = (await db.insert('INSERT INTO companies (name,currency,modules) VALUES (?,?,?)', 'شرکت نمونه', 'ریال', JSON.stringify(allModuleKeys())));
     await seedChart(db, cid);

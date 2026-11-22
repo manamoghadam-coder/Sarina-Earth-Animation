@@ -1,0 +1,73 @@
+# استقرار: PostgreSQL + برنامه + Caddy (HTTPS خودکار) + پشتیبان‌گیری روزانه
+#   cp deploy/.env.example .env   (مقادیر را پر کنید)   سپس:   docker compose up -d --build
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: erp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD را در .env تنظیم کنید}
+      POSTGRES_DB: erp
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U erp -d erp"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # پورت دیتابیس عمداً به بیرون منتشر نمی‌شود
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://erp:${POSTGRES_PASSWORD}@db:5432/erp
+      ERP_TRUST_PROXY: "1"
+      ERP_COOKIE_SECURE: "1"
+      ERP_SUPERADMIN_PASSWORD: ${ERP_SUPERADMIN_PASSWORD:?ERP_SUPERADMIN_PASSWORD را در .env تنظیم کنید}
+      ERP_SECRET: ${ERP_SECRET:?ERP_SECRET را در .env تنظیم کنید}
+    volumes: [erpdata:/data]
+    expose: ["3000"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [app]
+    ports: ["80:80", "443:443"]
+    environment:
+      ERP_DOMAIN: ${ERP_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  backup:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://erp:${POSTGRES_PASSWORD}@db:5432/erp
+      ERP_DATA_DIR: /data
+      ERP_BACKUP_DIR: /backups
+      ERP_BACKUP_KEEP: ${ERP_BACKUP_KEEP:-14}
+      ERP_BACKUP_KEY: ${ERP_BACKUP_KEY:?ERP_BACKUP_KEY را در .env تنظیم کنید}
+      ERP_BACKUP_HOOK: ${ERP_BACKUP_HOOK:-}
+    volumes:
+      - erpdata:/data:ro      # فایل‌های پیوست
+      - ./backups:/backups    # مقصد پشتیبان‌ها (روی میزبان)
+    # هر ۲۴ ساعت یک پشتیبان رمزنگاری‌شده؛ در صورت خطا پیام BACKUP FAILED در لاگ می‌ماند
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        while true; do
+          node --disable-warning=ExperimentalWarning src/backup.js backup || echo "BACKUP FAILED $$(date -u)" >&2
+          sleep $${ERP_BACKUP_INTERVAL_SEC:-86400}
+        done
+
+volumes:
+  pgdata:
+  erpdata:
+  caddy_data:
+  caddy_config:

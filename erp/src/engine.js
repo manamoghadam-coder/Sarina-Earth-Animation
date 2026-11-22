@@ -1,6 +1,6 @@
 import { ENTITIES } from './entities.js';
-import { HttpError, bad, isoDate, today } from './util.js';
-import { hashPassword } from './auth.js';
+import { HttpError, bad, isoDate, today, toId } from './util.js';
+import { hashPassword, can } from './auth.js';
 import { deleteFile } from './files.js';
 
 const q = (s) => `"${s}"`;
@@ -36,17 +36,24 @@ async function coerce(ctx, def, f, v) {
     case 'select': if (!f.options.some((o) => o.v === v)) throw bad(`«${f.label}» مقدار نامعتبر دارد`); return v;
     case 'bool': return v === true || v === 1 || v === '1' || v === 'true' ? 1 : 0;
     case 'ref': {
-      const id = Number(v);
-      if (!Number.isInteger(id)) throw bad(`«${f.label}» نامعتبر است`);
+      const id = toId(typeof v === 'number' ? v : String(v));
+      if (!id) throw bad(`«${f.label}» نامعتبر است`);
       // جلوگیری از ارجاع بین‌شرکتی (Tenant isolation)
       if (!(await ctx.db.get(`SELECT 1 FROM e_${f.ref} WHERE id=? AND company_id=?`, id, ctx.companyId))) throw bad(`«${f.label}» یافت نشد`);
       return id;
     }
-    case 'password': if (typeof v !== 'string' || v.length < 6) throw bad('گذرواژه حداقل ۶ نویسه باشد'); return hashPassword(v);
+    case 'password': if (typeof v !== 'string' || v.length < 8 || v.length > 200) throw bad('گذرواژه باید ۸ تا ۲۰۰ نویسه باشد'); return hashPassword(v);
     case 'lines': if (!Array.isArray(v)) throw bad('اقلام نامعتبر است'); return v;
     default: return null;
   }
 }
+
+// فیلدهای حساس (حقوق، کد ملی، …) فقط برای نقش‌های دارای مجوز «مشاهده‌ی حقوق و دستمزد»
+export function hiddenFields(ctx, def) {
+  if (!def.fields.some((f) => f.sensitive) || can(ctx.user.role, 'payroll', 'v')) return new Set();
+  return new Set(def.fields.filter((f) => f.sensitive).map((f) => f.k));
+}
+function strip(ctx, def, row) { for (const k of hiddenFields(ctx, def)) delete row[k]; return row; }
 
 function decode(def, row) {
   if (!row) return row;
@@ -56,10 +63,11 @@ function decode(def, row) {
 }
 
 export async function getRow(ctx, def, id, { raw } = {}) {
-  const row = (await ctx.db.get(`SELECT * FROM ${table(def)} WHERE id=? AND company_id=?`, Number(id), ctx.companyId));
+  const rid = toId(id);
+  const row = rid && (await ctx.db.get(`SELECT * FROM ${table(def)} WHERE id=? AND company_id=?`, rid, ctx.companyId));
   if (!row) return null;
   if (raw) { for (const f of def.fields) if (f.type === 'lines') { try { row[f.k] = JSON.parse(row[f.k] || '[]'); } catch { row[f.k] = []; } } return row; }
-  return decode(def, row);
+  return strip(ctx, def, decode(def, row));
 }
 
 export function labelOf(def, row) {
@@ -79,29 +87,30 @@ async function withLabels(ctx, def, rows) {
   return rows;
 }
 
-function filterClause(def, query) {
+function filterClause(def, query, hidden = new Set()) {
   const where = ['company_id=?']; const extra = [];
-  const s = (query.q || '').trim();
+  const s = String(query.q || '').trim().slice(0, 100);
   if (s) {
-    const cols = def.search || def.fields.filter((f) => f.type === 'text').map((f) => f.k);
+    const cols = (def.search || def.fields.filter((f) => f.type === 'text').map((f) => f.k)).filter((c) => !hidden.has(c));
     if (cols.length) { where.push('(' + cols.map((c) => `${q(c)} LIKE ? ESCAPE '\\'`).join(' OR ') + ')'); for (const _ of cols) extra.push('%' + s.replace(/[\\%_]/g, '\\$&') + '%'); }
   }
   for (const f of def.fields) {
     const v = query['f_' + f.k];
-    if (v !== undefined && v !== '' && (f.filter || f.type === 'ref')) { where.push(`${q(f.k)}=?`); extra.push(f.type === 'ref' ? Number(v) : v); }
+    if (v !== undefined && v !== '' && !hidden.has(f.k) && (f.filter || f.type === 'ref')) { where.push(`${q(f.k)}=?`); extra.push(f.type === 'ref' ? (toId(v) ?? -1) : v); }
   }
   return { sql: where.join(' AND '), extra };
 }
 
 export async function list(ctx, def, query) {
-  const { sql, extra } = filterClause(def, query);
+  const hidden = hiddenFields(ctx, def);
+  const { sql, extra } = filterClause(def, query, hidden);
   const size = Math.min(Math.max(parseInt(query.size) || 25, 1), 500);
   const page = Math.max(parseInt(query.page) || 1, 1);
-  const sortable = new Set(['id', 'created_at', ...def.fields.map((f) => f.k)]);
+  const sortable = new Set(['id', 'created_at', ...def.fields.map((f) => f.k).filter((k) => !hidden.has(k))]);
   const sort = sortable.has(query.sort) ? query.sort : (def.sortDefault || 'id');
   const dir = query.dir === 'asc' ? 'ASC' : (query.dir === 'desc' ? 'DESC' : (sort === 'id' || def.sortDefault === sort ? 'DESC' : 'ASC'));
   const total = (await ctx.db.get(`SELECT COUNT(*) n FROM ${table(def)} WHERE ${sql}`, ctx.companyId, ...extra)).n;
-  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE ${sql} ORDER BY ${q(sort)} ${dir}, id DESC LIMIT ? OFFSET ?`, ctx.companyId, ...extra, size, (page - 1) * size)).map((r) => decode(def, r));
+  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE ${sql} ORDER BY ${q(sort)} ${dir}, id DESC LIMIT ? OFFSET ?`, ctx.companyId, ...extra, size, (page - 1) * size)).map((r) => strip(ctx, def, decode(def, r)));
   return { rows: await withLabels(ctx, def, rows), total, page, size };
 }
 
@@ -114,7 +123,9 @@ export async function getOne(ctx, def, id) {
 
 async function build(ctx, def, input, old) {
   const rec = old ? { ...old } : {};
+  const hidden = hiddenFields(ctx, def);
   for (const f of def.fields) {
+    if (hidden.has(f.k)) { if (!old) rec[f.k] = f.default ?? null; continue; } // فیلد حساس: نه خوانده می‌شود نه نوشته
     if (f.readonly) {
       if (!old && f.default !== undefined) rec[f.k] = f.default;
       continue;
@@ -208,9 +219,10 @@ export async function lookup(ctx, def) {
 }
 
 export async function toCsv(ctx, def) {
-  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id`, ctx.companyId)).map((r) => decode(def, r));
+  const rows = (await ctx.db.all(`SELECT * FROM ${table(def)} WHERE company_id=? ORDER BY id`, ctx.companyId)).map((r) => strip(ctx, def, decode(def, r)));
   await withLabels(ctx, def, rows);
-  const fields = def.fields.filter((f) => f.type !== 'lines' && f.type !== 'password');
+  const hidden = hiddenFields(ctx, def);
+  const fields = def.fields.filter((f) => f.type !== 'lines' && f.type !== 'password' && !hidden.has(f.k));
   const esc = (v) => {
     let s = v === null || v === undefined ? '' : String(v);
     if (/^[=+\-@\t\r]/.test(s)) s = "'" + s; // جلوگیری از CSV/Formula injection

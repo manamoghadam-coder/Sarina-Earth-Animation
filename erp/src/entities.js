@@ -74,18 +74,18 @@ export const ENTITIES = {
     ],
   },
   employees: {
-    module: 'hr', title: 'کارکنان', singular: 'کارمند', label: ['number', 'name'], numbering: 'EMP', search: ['number', 'name', 'national_id', 'position'],
+    module: 'hr', title: 'کارکنان', singular: 'کارمند', label: ['number', 'name'], numbering: 'EMP', search: ['number', 'name', 'national_id', 'position'], attachModule: 'payroll',
     fields: [
       { k: 'number', label: 'کد پرسنلی', type: 'text', readonly: true, list: true },
       { k: 'name', label: 'نام و نام خانوادگی', type: 'text', required: true, list: true },
-      { k: 'national_id', label: 'کد ملی', type: 'text', pattern: '^\\d{10}$', patternMsg: 'کد ملی باید ۱۰ رقم باشد' },
+      { k: 'national_id', label: 'کد ملی', type: 'text', sensitive: true, pattern: '^\\d{10}$', patternMsg: 'کد ملی باید ۱۰ رقم باشد' },
       { k: 'department_id', label: 'واحد', type: 'ref', ref: 'departments', list: true },
       { k: 'position', label: 'سمت', type: 'text', list: true },
       dateField('hire_date', 'تاریخ استخدام'),
-      { k: 'salary', label: 'حقوق پایه (ماهانه)', type: 'money', min: 0 },
-      { k: 'housing_allowance', label: 'حق مسکن', type: 'money', min: 0 },
-      { k: 'food_allowance', label: 'حق خواروبار', type: 'money', min: 0 },
-      { k: 'child_allowance', label: 'حق اولاد', type: 'money', min: 0 },
+      { k: 'salary', label: 'حقوق پایه (ماهانه)', type: 'money', min: 0 , sensitive: true },
+      { k: 'housing_allowance', label: 'حق مسکن', type: 'money', min: 0 , sensitive: true },
+      { k: 'food_allowance', label: 'حق خواروبار', type: 'money', min: 0 , sensitive: true },
+      { k: 'child_allowance', label: 'حق اولاد', type: 'money', min: 0 , sensitive: true },
       { k: 'insured', label: 'مشمول بیمه', type: 'bool', default: 1 },
       { k: 'taxable', label: 'مشمول مالیات', type: 'bool', default: 1 },
       { k: 'status', label: 'وضعیت', type: 'select', options: S(['active', 'شاغل', 'ok'], ['leave', 'مرخصی بلندمدت', 'warn'], ['terminated', 'ترک کار', 'mute']), default: 'active', list: true, filter: true },
@@ -688,11 +688,11 @@ async function recalcProject(ctx, pid) {
 for (const [key, d] of Object.entries(ENTITIES)) d.key = key;
 
 // نسخه‌ی بدون تابع برای ارسال به مرورگر
-export function publicMeta(def) {
+export function publicMeta(def, hidden = new Set()) {
   return {
     key: def.key, module: def.module, title: def.title, singular: def.singular, noEdit: !!def.noEdit, noCreate: !!def.noCreate, numbered: !!def.numbering,
     editWhen: def.editWhen,
-    fields: def.fields.map(({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv }) => ({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv })),
+    fields: def.fields.filter((f) => !hidden.has(f.k)).map(({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv }) => ({ k, label, type, options, ref, required, readonly, list, filter, display, min, max, cols, default: dv })),
     actions: (def.actions || []).map(({ key, label, from, style, confirm }) => ({ key, label, from, style, confirm })),
   };
 }
