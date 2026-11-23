@@ -35,6 +35,15 @@ export async function generate(now = new Date()) {
       }
     }
   }
+  // nightly reflection: one reminder per child per evening (skipped when already answered or inside quiet hours)
+  for (const k of kids) {
+    if (!k.reflection_enabled) continue;
+    const due = tehranInstant(today, String(k.reflection_time).slice(0, 5));
+    if (now < due || now.getTime() - due.getTime() > 45 * 60000 || inQuiet(nowP.minutes, k.quiet_start, k.quiet_end)) continue;
+    const [done] = await sys(`SELECT 1 FROM reflection_entries WHERE user_id=$1 AND day=$2`, [k.id, today]); if (done) continue;
+    await enqueue({ user_id: k.id, kind: 'reflection', title: 'مرور شبانه', body: `${k.display_name} جان، وقت مرور امروز و گفتن «خدایا شکرت» است 🌙`, icon: '🌙', due, key: `refl:${k.id}:${today}`, ref_type: 'reflection', ref_day: today,
+      voice: `${k.display_name} جان، وقت مرور امروز است. بیا چند تا سؤال کوتاه جواب بدهیم و خدا را شکر کنیم.` });
+  }
   // parent: events, task deadlines, installments, morning/night routines
   const [mom] = await sys(`SELECT id FROM users WHERE role='parent' AND active ORDER BY created_at LIMIT 1`);
   if (!mom) return;

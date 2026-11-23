@@ -25,11 +25,16 @@ before(async () => {
 });
 after(async () => { await sys(`DELETE FROM users WHERE username LIKE 's\\_%'`); await app.close(); await sysPool.end(); await appPool.end(); });
 
-test('diary is private: not even Mana can read a child diary; owner CRUD works', async () => {
+test('diary: Mana can READ (not edit) children diaries; siblings and other adults cannot; adult diaries stay private', async () => {
   const c = await call('s_kid', 'POST', '/api/diary', { title: 'امروز', body: 'راز من', mood: '😊' });
   assert.equal(c.statusCode, 201, c.body);
   assert.equal((await call('s_kid', 'GET', '/api/diary')).json().length, 1);
-  assert.equal((await call('s_mom', 'GET', '/api/diary')).json().length, 0);          // Mana sees only her own diary
+  assert.equal((await call('s_mom', 'GET', '/api/diary')).json().length, 0);          // her own diary is empty
+  assert.equal((await call('s_mom', 'GET', `/api/diary?user_id=${ids.s_kid}`)).json().length, 1);   // but she may read the child's
+  assert.equal((await call('s_kid2', 'GET', `/api/diary?user_id=${ids.s_kid}`)).json().length, 0);  // ?user_id is ignored for non-parents
+  assert.equal((await call('s_dad', 'GET', `/api/diary?user_id=${ids.s_kid}`)).json().length, 0);
+  await call('s_dad', 'POST', '/api/diary', { body: 'خاطره‌ی بابا' });
+  assert.equal((await call('s_mom', 'GET', `/api/diary?user_id=${ids.s_dad}`)).json().length, 0);   // adults' diaries stay private
   assert.equal((await call('s_kid2', 'GET', '/api/diary')).json().length, 0);
   const id = c.json().id;
   assert.equal((await call('s_mom', 'PATCH', `/api/diary/${id}`, { body: 'x' })).statusCode, 404);
@@ -98,4 +103,32 @@ test('each person changes their OWN profile photo; others cannot; role/permissio
   const up2 = await app.inject({ method: 'POST', url: '/api/me/avatar', headers: { ...H, cookie: jar.s_kid2, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: form });
   assert.equal(up2.statusCode, 403);
   const role = await sys(`SELECT role FROM users WHERE id=$1`, [ids.s_kid2]); assert.equal(role[0].role, 'child');
+});
+
+test('nightly reflection: questions, one entry per day, Mana reads children answers, scheduler reminds once', async () => {
+  await sys(`UPDATE users SET permissions='{}' WHERE id = ANY($1)`, [[ids.s_kid, ids.s_kid2, ids.s_dad]]);   // earlier tests changed switches
+  const t = (await call('s_kid2', 'GET', '/api/reflection/today')).json();
+  assert.equal(t.questions.length >= 5, true); assert.equal(t.questions.at(-1).kind, 'gratitude'); assert.equal(t.entry, null);
+  const answers = t.questions.map((q: any, i: number) => ({ q: q.text, kind: q.kind, a: i === 0 ? 'بازی با سارینا' : '' }));
+  assert.equal((await call('s_kid2', 'PUT', '/api/reflection/today', { answers })).statusCode, 200);
+  assert.equal((await call('s_kid2', 'PUT', '/api/reflection/today', { answers: answers.map((x: any) => ({ ...x, a: '' })) })).statusCode, 400);
+  assert.equal((await call('s_kid2', 'PUT', '/api/reflection/today', { answers: answers.map((x: any, i: number) => ({ ...x, a: i === 0 ? 'ویرایش' : '' })) })).statusCode, 200);   // same day = update
+  assert.equal((await sys(`SELECT count(*)::int n FROM reflection_entries WHERE user_id=$1`, [ids.s_kid2]))[0].n, 1);
+  assert.equal((await call('s_mom', 'GET', `/api/reflection?user_id=${ids.s_kid2}`)).json().length, 1);
+  assert.equal((await call('s_kid', 'GET', `/api/reflection?user_id=${ids.s_kid2}`)).json().length, 0);
+  assert.equal((await call('s_dad', 'GET', `/api/reflection?user_id=${ids.s_kid2}`)).json().length, 0);
+  // Mana edits questions; kids cannot
+  assert.equal((await call('s_kid', 'POST', '/api/reflection-questions', { text: 'x' })).statusCode, 403);
+  const nq = await call('s_mom', 'POST', '/api/reflection-questions', { text: 'سؤال ویژه‌ی فقط یک نفر', child_id: ids.s_kid });
+  assert.equal(nq.statusCode, 201, nq.body);
+  assert.equal((await call('s_kid', 'GET', '/api/reflection/today')).json().questions.some((q: any) => q.id === nq.json().id), true);
+  assert.equal((await call('s_kid2', 'GET', '/api/reflection/today')).json().questions.some((q: any) => q.id === nq.json().id), false);
+  await call('s_mom', 'DELETE', `/api/reflection-questions/${nq.json().id}`);
+  // scheduler: at the configured evening time a reminder is created once (and not for a child who already answered)
+  const { generate } = await import('../src/scheduler.ts'); const { tehranInstant, todayISO } = await import('../src/jalali.ts');
+  await sys(`UPDATE child_settings SET reflection_time='20:30', quiet_start='23:00', quiet_end='06:00' WHERE child_id = ANY($1)`, [[ids.s_kid, ids.s_kid2]]);
+  const at = new Date(tehranInstant(todayISO(), '20:31'));
+  await generate(at); await generate(at);
+  const n = await sys(`SELECT user_id FROM notifications WHERE kind='reflection' AND user_id = ANY($1)`, [[ids.s_kid, ids.s_kid2]]);
+  assert.deepEqual(n.map((x) => x.user_id), [ids.s_kid]);       // s_kid2 already answered; no duplicates
 });

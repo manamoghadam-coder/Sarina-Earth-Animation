@@ -30,6 +30,7 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
       case 'stars': return say(`تو الان ${stars} ستاره داری. ${stars >= 10 ? 'آفرین!' : 'ادامه بده!'}`);
       case 'story': { const s = STORIES[Math.floor(Math.random() * STORIES.length)]; go('/stories'); await say(`قصه‌ی ${s.title}. ${s.text}`); return; }
       case 'diary': go('/diary'); onClose(); return speak('دفترچه‌ی خاطراتت را باز کردم. هر چه دلت خواست بنویس. اگر بخواهی با صدا بنویسی، بگو: در دفترچه بنویس، و بعد حرفت را.');
+      case 'night': go('/night'); onClose(); return speak('بیا مرور امروز را انجام بدهیم.');
       case 'chat': go('/chat'); onClose(); return speak('چت خانواده را باز کردم.');
       case 'profile': go('/profile'); onClose(); return speak('اینجا می‌توانی عکس پروفایلت را عوض کنی.');
       case 'mom': {

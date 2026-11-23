@@ -54,12 +54,13 @@ export const sttErrorText = (code: string) => ({
 
 // ---------- command matching (pure) ----------
 const norm = (s: string) => s.replace(/[ي]/g, 'ی').replace(/[ك]/g, 'ک').replace(/[‌‌]/g, ' ').replace(/[؟?!.،,]/g, ' ').replace(/\s+/g, ' ').trim();
-export type VoiceCmd = 'greet' | 'today' | 'now' | 'next' | 'done' | 'story' | 'stars' | 'diary' | 'mom' | 'chat' | 'profile' | 'yes' | 'no' | 'help' | 'unknown';
+export type VoiceCmd = 'greet' | 'today' | 'now' | 'next' | 'done' | 'story' | 'stars' | 'diary' | 'night' | 'mom' | 'chat' | 'profile' | 'yes' | 'no' | 'help' | 'unknown';
 export function matchCommand(raw: string): VoiceCmd {
   const t = norm(raw);
   if (/^(بله|آره|اره|باشه|تایید|درسته)( |$)/.test(t)) return 'yes';
   if (/^(نه|نخیر|نمیخوام|نمی خوام|لغو)( |$)/.test(t)) return 'no';
   if (/(پیام مامان|پیامهای مامان|پیام های مامان|نامه مامان|مامان.*(نوشته|فرستاده)|نامه)/.test(t)) return 'mom';
+  if (/(مرور (امروز|شب|شبانه)|سوال(های)? شبانه|سوال شب|شکر|سپاس)/.test(t)) return 'night';
   if (/(دفترچه|دفتر خاطرات|دلنوشته|خاطرات)/.test(t)) return 'diary';
   if (/(چت|گپ|با (بابا|مامان|سامان|سارینا) (حرف|صحبت|پیام))/.test(t)) return 'chat';
   if (/(عکس پروفایل|عکس خودم|عوض کردن عکس)/.test(t)) return 'profile';

@@ -9,8 +9,12 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 export default async function socialRoutes(app: FastifyInstance) {
   // ---------------- private diary (author only; enforced by RLS) ----------------
   const diaryBody = z.object({ title: z.string().trim().max(120).nullish(), body: text(10000), mood: z.string().trim().max(8).nullish(), entry_date: zDate.optional() }).strict();
-  app.get('/api/diary', { preHandler: requirePerm('diary', 1) }, async (req) =>
-    withActor(req.actor!, (q) => q(`SELECT id, entry_date, title, body, mood, created_at, updated_at FROM diary_entries WHERE user_id=$1 ORDER BY entry_date DESC, created_at DESC LIMIT 300`, [req.actor!.id])));
+  // Own diary; Mana may pass ?user_id=<child> to read a child's diary (the database allows only that: children's entries, read-only)
+  app.get('/api/diary', { preHandler: requirePerm('diary', 1) }, async (req) => {
+    const { user_id } = z.object({ user_id: zId.optional() }).parse(req.query);
+    const uid = req.actor!.role === 'parent' && user_id ? user_id : req.actor!.id;
+    return withActor(req.actor!, (q) => q(`SELECT id, entry_date, title, body, mood, created_at, updated_at FROM diary_entries WHERE user_id=$1 ORDER BY entry_date DESC, created_at DESC LIMIT 300`, [uid]));
+  });
   app.post('/api/diary', { preHandler: requirePerm('diary', 2) }, async (req, reply) => {
     const d = diaryBody.parse(req.body);
     const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO diary_entries (user_id, entry_date, title, body, mood) VALUES ($1, COALESCE($2::date, $3::date), $4, $5, $6) RETURNING id, entry_date, title, body, mood, created_at, updated_at`,
@@ -98,6 +102,48 @@ export default async function socialRoutes(app: FastifyInstance) {
   app.delete('/api/chat/:id', { preHandler: requirePerm('chat', 2) }, async (req, reply) => {
     const id = z.coerce.number().int().parse((req.params as any).id);
     const r = await withActor(req.actor!, (q) => q(`DELETE FROM chat_messages WHERE id=$1 RETURNING id`, [id]));
+    return r[0] ? { ok: true } : reply.code(404).send({ error: 'not_found' });
+  });
+
+  // ---------------- nightly reflection (evening questions) ----------------
+  const qOrder = `ORDER BY (kind='gratitude'), sort, created_at`;
+  app.get('/api/reflection/today', { preHandler: requirePerm('diary', 1) }, async (req) => {
+    const day = todayISO();
+    return withActor(req.actor!, async (q) => ({
+      day,
+      questions: await q(`SELECT id, text, kind FROM reflection_questions WHERE active AND (child_id IS NULL OR child_id=$1) ${qOrder}`, [req.actor!.id]),
+      entry: (await q(`SELECT id, day, answers, updated_at FROM reflection_entries WHERE user_id=$1 AND day=$2`, [req.actor!.id, day]))[0] ?? null,
+    }));
+  });
+  app.put('/api/reflection/today', { preHandler: requirePerm('diary', 2) }, async (req, reply) => {
+    const { answers } = z.object({ answers: z.array(z.object({ q: text(300), kind: z.enum(['text', 'gratitude']).default('text'), a: z.string().trim().max(2000) }).strict()).min(1).max(12) }).strict().parse(req.body);
+    if (!answers.some((x) => x.a)) return reply.code(400).send({ error: 'empty' });
+    const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO reflection_entries (user_id, day, answers) VALUES ($1,$2,$3) ON CONFLICT (user_id, day) DO UPDATE SET answers=EXCLUDED.answers, updated_at=now() RETURNING id, day, answers`, [req.actor!.id, todayISO(), JSON.stringify(answers)]));
+    return r;
+  });
+  // history: own, or (Mana) a child's
+  app.get('/api/reflection', { preHandler: requirePerm('diary', 1) }, async (req) => {
+    const { user_id } = z.object({ user_id: zId.optional() }).parse(req.query);
+    const uid = req.actor!.role === 'parent' && user_id ? user_id : req.actor!.id;
+    return withActor(req.actor!, (q) => q(`SELECT id, day, answers, updated_at FROM reflection_entries WHERE user_id=$1 ORDER BY day DESC LIMIT 60`, [uid]));
+  });
+  // Mana edits the questions (all children, or one child)
+  app.get('/api/reflection-questions', { preHandler: requireParent }, async (req) =>
+    withActor(req.actor!, (q) => q(`SELECT id, child_id, text, kind, sort, active FROM reflection_questions ${qOrder}`)));
+  const rq = z.object({ child_id: zId.nullish(), text: text(300), kind: z.enum(['text', 'gratitude']).default('text'), sort: z.number().int().min(0).max(1000).default(50), active: z.boolean().default(true) }).strict();
+  app.post('/api/reflection-questions', { preHandler: requireParent }, async (req, reply) => {
+    const d = rq.parse(req.body);
+    const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO reflection_questions (child_id,text,kind,sort,active) VALUES ($1,$2,$3,$4,$5) RETURNING id, child_id, text, kind, sort, active`, [d.child_id ?? null, d.text, d.kind, d.sort, d.active]));
+    return reply.code(201).send(r);
+  });
+  app.patch('/api/reflection-questions/:id', { preHandler: requireParent }, async (req, reply) => {
+    const id = zId.parse((req.params as any).id); const d = rq.partial().strict().parse(req.body);
+    const [r] = await withActor(req.actor!, (q) => q(`UPDATE reflection_questions SET text=COALESCE($2,text), kind=COALESCE($3,kind), sort=COALESCE($4,sort), active=COALESCE($5,active) WHERE id=$1 RETURNING id, child_id, text, kind, sort, active`, [id, d.text ?? null, d.kind ?? null, d.sort ?? null, d.active ?? null]));
+    return r ?? reply.code(404).send({ error: 'not_found' });
+  });
+  app.delete('/api/reflection-questions/:id', { preHandler: requireParent }, async (req, reply) => {
+    const id = zId.parse((req.params as any).id);
+    const r = await withActor(req.actor!, (q) => q(`DELETE FROM reflection_questions WHERE id=$1 RETURNING id`, [id]));
     return r[0] ? { ok: true } : reply.code(404).send({ error: 'not_found' });
   });
 }

@@ -26,6 +26,7 @@ export function NotificationCenter({ speakAloud, kid, paused }: { speakAloud: bo
       {speakAloud && <button aria-label="دوباره بخوان" className="btn btn-ghost !px-3" onClick={() => speak(cur.voice_text ?? cur.body)}>🔊</button>}</div>
     <div className="flex gap-2 mt-3 flex-wrap">
       {(cur.ref_type === 'activity' || cur.ref_type === 'task') && <button className="btn btn-teal flex-1" onClick={() => act('done')}>انجام شد ✅</button>}
+      {cur.ref_type === 'reflection' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/night'); }}>🌙 شروع</button>}
       {cur.ref_type === 'mom_message' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/messages'); }}>💌 بخوان</button>}
       {cur.ref_type !== 'mom_message' && <button className="btn btn-ghost flex-1" onClick={() => act('snooze')}>۱۰ دقیقه بعد ⏰</button>}
       <button className="btn btn-ghost flex-1" onClick={() => act('seen')}>باشه</button></div>

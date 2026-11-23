@@ -16,7 +16,7 @@ export default function Diary() {
     if (e!.id) await api(`/diary/${e!.id}`, { method: 'PATCH', body: b }); else await api('/diary', { body: b }); setE(null); await list.reload(); }, 'ذخیره شد 💜');
   return <div className="space-y-3 max-w-2xl"><div className="flex items-center justify-between"><h1 className={kid ? 'text-3xl font-extrabold' : 'text-xl font-extrabold'}>📖 دفترچه‌ی خاطرات من</h1>
       {canWrite && <button className={`btn btn-teal ${kid ? '!text-xl' : ''}`} onClick={() => setE({ entry_date: tehranToday(), mood: '😊', body: '' })}>＋ نوشتن</button>}</div>
-    <p className="text-sm opacity-70">🔒 این دفترچه فقط برای خودت است؛ هیچ‌کس دیگر (حتی مانا) آن را نمی‌بیند.</p>
+    <p className="text-sm opacity-70">{kid ? '🔒 این دفترچه را فقط تو و مامان می‌بینید؛ بقیه‌ی خانواده نمی‌بینند.' : '🔒 این دفترچه فقط برای خودت است؛ هیچ‌کس دیگری آن را نمی‌بیند.'}</p>
     {!canWrite && <p role="note" className="rounded-xl bg-amber-50 border border-amber-200 text-amber-800 px-3 py-2 text-sm">👁 نوشتن در دفترچه برای این حساب غیرفعال است؛ فقط می‌توانی بخوانی.</p>}
     <Loading error={list.error} loading={list.loading} />
     {list.data?.length === 0 && <Empty>هنوز چیزی ننوشته‌ای. هر وقت دلت خواست اینجا بنویس ✍️</Empty>}
