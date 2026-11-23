@@ -58,10 +58,10 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
   if (req.actor!.role !== 'parent') return reply.code(403).send({ error: 'forbidden' });
 }
 
-export const MODULES = ['tasks', 'events', 'finance', 'goals', 'children', 'photos'] as const;
+export const MODULES = ['tasks', 'events', 'finance', 'goals', 'children', 'photos', 'home'] as const;
 /** Personal features every non-parent account has; Mana sets 0=none 1=view 2=view+write per user. */
-export const FEATURES = ['diary', 'chat', 'inbox', 'avatar'] as const;
-export const FEATURE_DEFAULT: Record<(typeof FEATURES)[number], number> = { diary: 2, chat: 2, inbox: 1, avatar: 2 };
+export const FEATURES = ['diary', 'chat', 'inbox', 'avatar', 'wishes'] as const;
+export const FEATURE_DEFAULT: Record<(typeof FEATURES)[number], number> = { diary: 2, chat: 2, inbox: 1, avatar: 2, wishes: 2 };
 const clamp = (n: unknown) => Math.min(2, Math.max(0, Number(n) || 0));
 export const isFeature = (m: string): m is (typeof FEATURES)[number] => (FEATURES as readonly string[]).includes(m);
 export const level = (a: Actor, m: string) => {

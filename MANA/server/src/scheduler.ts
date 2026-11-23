@@ -1,5 +1,5 @@
 import { sys } from './db.ts';
-import { addDays, persianWeekday, tehranInstant, tehranParts, todayISO } from './jalali.ts';
+import { addDays, persianWeekday, tehranInstant, tehranParts, todayISO, toJalali } from './jalali.ts';
 import { sendPush } from './push.ts';
 import { fmtMoney } from './util.ts';
 
@@ -13,6 +13,24 @@ const hhmm = (d: Date) => { const p = tehranParts(d); return `${String(p.hour).p
 async function enqueue(n: { user_id: string; kind: string; title: string; body: string; icon: string; due: Date; key: string; ref_type?: string; ref_id?: string; ref_day?: string; voice?: string }) {
   await sys(`INSERT INTO notifications (user_id,kind,title,body,icon,voice_text,due_at,dedupe_key,ref_type,ref_id,ref_day) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (dedupe_key) DO NOTHING`,
     [n.user_id, n.kind, n.title, n.body, n.icon, n.voice ?? n.body, n.due, n.key, n.ref_type ?? null, n.ref_id ?? null, n.ref_day ?? null]);
+}
+
+/** Push/in-app notification for a new chat message (throttled: at most one unseen chat notification per person per 5 minutes). */
+export async function notifyChat(senderId: string, peerId: string | null, body: string) {
+  const [snd] = await sys(`SELECT display_name FROM users WHERE id=$1`, [senderId]); if (!snd) return;
+  const to = await sys(`SELECT u.id, u.role, u.permissions, s.notifications_enabled, s.quiet_start, s.quiet_end FROM users u LEFT JOIN child_settings s ON s.child_id=u.id
+    WHERE u.active AND u.id <> $1 AND ($2::uuid IS NULL OR u.id = $2)`, [senderId, peerId]);
+  const nowMin = tehranParts().minutes;
+  for (const u of to) {
+    if (u.role !== 'parent' && Number(u.permissions?.chat ?? 2) < 1) continue;
+    if (u.role === 'child' && (!u.notifications_enabled || inQuiet(nowMin, u.quiet_start, u.quiet_end))) continue;
+    const [recent] = await sys(`SELECT 1 FROM notifications WHERE user_id=$1 AND kind='chat' AND seen_at IS NULL AND done_at IS NULL AND due_at > now() - interval '5 minutes'`, [u.id]); if (recent) continue;
+    await enqueue({ user_id: u.id, kind: 'chat', title: `💬 ${snd.display_name}${peerId ? '' : ' (گروه)'}`, body: body.slice(0, 100), icon: '💬', due: new Date(), key: `chat:${u.id}:${Date.now()}`, ref_type: 'chat' });
+  }
+}
+/** Same notification for a list of recipients (used by wishes etc.). */
+export async function notifyUsers(ids: string[], n: { kind: string; title: string; body: string; icon: string; key: string; ref_type?: string; ref_id?: string }) {
+  for (const id of ids) await enqueue({ user_id: id, kind: n.kind, title: n.title, body: n.body, icon: n.icon, due: new Date(), key: `${n.key}:${id}`, ref_type: n.ref_type, ref_id: n.ref_id });
 }
 
 /** Builds due notifications from schedules. Idempotent thanks to dedupe_key. */
@@ -67,6 +85,26 @@ export async function generate(now = new Date()) {
     const [r] = await sys(`SELECT count(*) FILTER (WHERE status='done' AND done_at >= $1)::int done, count(*) FILTER (WHERE status IN ('todo','doing','waiting') AND due_date <= $2)::int left FROM tasks`, [at('00:00'), today]);
     const [sp] = await sys(`SELECT COALESCE(SUM(amount),0)::bigint s FROM transactions WHERE kind='expense' AND occurred_on=$1`, [today]);
     await enqueue({ user_id: mom.id, kind: 'night', title: 'جمع‌بندی شبانه', icon: '🌙', due: at('22:00'), key: `night:${today}`, body: `${r.done} کار انجام شد، ${r.left} کار ناتمام. هزینه امروز: ${fmtMoney(sp.s)} تومان. برای فردا برنامه بریز.` });
+  }
+  // ----- weekly family report (Friday evening), wish-board refresh, annual dates -----
+  if (wd === 6 && now >= at('18:00') && now.getTime() - at('18:00').getTime() <= 3 * 3600000)
+    await enqueue({ user_id: mom.id, kind: 'weekly_report', title: 'گزارش هفتگی خانواده', body: 'گزارش این هفته آماده است: ستاره‌ها، مرور شبانه، مالی و نکته‌های پیشنهادی.', icon: '📊', due: at('18:00'), key: `weekly:${today}`, ref_type: 'weekly_report' });
+  if (now >= at('09:00') && now.getTime() - at('09:00').getTime() <= 4 * 3600000) {
+    const boards = await sys(`SELECT b.id, b.user_id, u.display_name, u.role FROM wish_boards b JOIN users u ON u.id=b.user_id WHERE NOT b.archived AND u.active AND (b.starts_on + (b.refresh_months || ' months')::interval)::date <= $1`, [today]);
+    for (const b of boards) {
+      await enqueue({ user_id: b.user_id, kind: 'wish_refresh', title: 'وقت به‌روزرسانی تابلو آرزوها', body: 'چند ماه گذشته! آرزوهای تازه اضافه کن و آن‌هایی را که به آن‌ها رسیده‌ای تیک بزن 🌠', icon: '🌠', due: at('09:00'), key: `wishrefresh:${b.id}`, ref_type: 'wishes' });
+      if (b.role === 'child') await enqueue({ user_id: mom.id, kind: 'wish_refresh', title: `تابلو آرزوهای ${b.display_name}`, body: 'زمان به‌روزرسانی تابلو رسیده است؛ یک گفتگوی خوب درباره‌ی آرزوهایش داشته باشید.', icon: '🌠', due: at('09:00'), key: `wishrefresh-mom:${b.id}`, ref_type: 'wishes' });
+    }
+    const j = toJalali(today); const j3 = toJalali(addDays(today, 3));
+    const dates = await sys(`SELECT d.*, u.display_name AS person FROM family_dates d LEFT JOIN users u ON u.id=d.person_id WHERE d.notify AND ((d.jm=$1 AND d.jd=$2) OR (d.jm=$3 AND d.jd=$4))`, [j.jm, j.jd, j3.jm, j3.jd]);
+    const everyone = await sys(`SELECT id, role FROM users WHERE active`);
+    for (const d of dates) {
+      const isToday = d.jm === j.jm && d.jd === j.jd; const icon = d.kind === 'birthday' ? '🎂' : d.kind === 'anniversary' ? '💍' : '🎉';
+      for (const u of everyone) {
+        if (!isToday && u.role === 'child') continue;                // 3-day heads-up only for adults
+        await enqueue({ user_id: u.id, kind: 'family_date', title: d.title, body: isToday ? `امروز: ${d.title} ${icon}` : `۳ روز دیگر: ${d.title} ${icon}`, icon, due: at('09:00'), key: `fd:${d.id}:${isToday ? today : addDays(today, 3)}:${u.id}`, ref_type: 'family_date' });
+      }
+    }
   }
 }
 

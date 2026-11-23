@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api';
+import { useLevel } from '../auth';
 import { fmtDate, fmtTime } from '../jalali';
 import { DateField, Empty, Field, Loading, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
@@ -29,6 +30,7 @@ export default function Tasks() {
       <Field label="تاریخ شروع"><DateField allowEmpty value={edit.start_date} onChange={(v) => setEdit({ ...edit, start_date: v })} /></Field>
       <Field label="مهلت (تاریخ)"><DateField allowEmpty value={edit.due_date} onChange={(v) => setEdit({ ...edit, due_date: v })} /></Field>
       <Field label="ساعت مهلت (اختیاری، برای اعلان)"><input type="time" className="input" value={edit.due_time ?? ''} onChange={(e) => setEdit({ ...edit, due_time: e.target.value || null })} /></Field>
+      {edit.id && <TaskFiles taskId={edit.id} />}
       <div className="flex gap-2"><button className="btn btn-teal flex-1" onClick={() => act(async () => { const b = { title: edit.title, description: edit.description ?? null, assignee: edit.assignee ?? null, project_id: edit.project_id ?? null, priority: edit.priority, status: edit.status, start_date: edit.start_date ?? null, due_date: edit.due_date ?? null, due_time: edit.due_time ?? null };
         edit.id ? await api(`/tasks/${edit.id}`, { method: 'PATCH', body: b }) : await api('/tasks', { body: b }); setEdit(null); await tasks.reload(); }, 'ذخیره شد')}>ذخیره</button>
         {edit.id && <button className="btn btn-danger" onClick={() => confirm('این کار حذف شود؟') && act(async () => { await api(`/tasks/${edit.id}`, { method: 'DELETE' }); setEdit(null); await tasks.reload(); })}>حذف</button>}</div></Modal>}
@@ -42,4 +44,12 @@ function ProjectsModal({ list, onClose, reload }: { list: any[]; onClose: () => 
       <span className="flex gap-1"><button className="btn btn-ghost !py-1" onClick={() => act(async () => { await api(`/projects/${p.id}`, { method: 'PATCH', body: { status: p.status === 'active' ? 'done' : 'active' } }); await reload(); })}>{p.status === 'active' ? 'پایان' : 'فعال'}</button>
         <button className="btn btn-ghost !py-1" aria-label="حذف" onClick={() => confirm('پروژه حذف شود؟ کارهایش می‌مانند.') && act(async () => { await api(`/projects/${p.id}`, { method: 'DELETE' }); await reload(); })}>🗑</button></span></div>)}
     <div className="flex gap-2 mt-3"><input className="input" placeholder="نام پروژه‌ی جدید" value={title} onChange={(e) => setTitle(e.target.value)} /><button className="btn btn-teal" disabled={!title.trim()} onClick={() => act(async () => { await api('/projects', { body: { title } }); setTitle(''); await reload(); })}>افزودن</button></div></Modal>;
+}
+
+function TaskFiles({ taskId }: { taskId: string }) {
+  const files = useLoad(() => api<any[]>(`/tasks/${taskId}/files`), [taskId]); const act = useAction(); const w = useLevel('tasks') >= 2;
+  return <div className="mb-3"><span className="label">📎 فایل‌های پیوست (PDF یا عکس، تا ۱۰ مگابایت)</span>
+    {files.data?.map((f) => <div key={f.id} className="flex items-center gap-2 py-1 text-sm"><a className="flex-1 underline text-teal-700" href={`/api/task-files/${f.id}`} target="_blank" rel="noreferrer">{f.original_name}</a><span className="text-xs text-slate-400">{Math.ceil(f.bytes / 1024)}KB</span>
+      {w && <button type="button" className="btn btn-ghost !px-2 !min-h-0" aria-label="حذف فایل" onClick={() => confirm('فایل حذف شود؟') && act(async () => { await api(`/task-files/${f.id}`, { method: 'DELETE' }); await files.reload(); })}>🗑</button>}</div>)}
+    {w && <label className="btn btn-ghost cursor-pointer mt-1">＋ افزودن فایل<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (!f) return; const fd = new FormData(); fd.append('file', f); void act(async () => { await api(`/tasks/${taskId}/files`, { form: fd }); await files.reload(); }, 'فایل پیوست شد'); }} /></label>}</div>;
 }

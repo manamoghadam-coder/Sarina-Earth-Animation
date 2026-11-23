@@ -73,3 +73,21 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 ## مرور شبانه
 `GET /reflection/today` (سؤال‌های فعال + جواب امروز) · `PUT /reflection/today {answers:[{q,kind,a}]}` (یک ثبت در روز؛ دوباره‌فرستادن = ویرایش) · `GET /reflection[?user_id]` (تاریخچه؛ مانا برای کودکان).
 مانا 🔒: `GET/POST /reflection-questions` `{text,kind:'text'|'gratitude',child_id?,sort?,active?}` · `PATCH/DELETE /reflection-questions/:id`. تنظیم هر کودک با `PATCH /children/:id/settings` (`reflection_enabled`, `reflection_time`). زمان‌بند هر شب یک اعلان `reflection` می‌سازد (اگر هنوز جواب نداده باشد).
+
+## تابلو آرزوها
+`GET /wishes/board[?user_id]` (تابلوی فعال + آرزوها + بایگانی؛ مانا برای کودکان با `user_id`) · `GET /wishes/boards/:id` · `POST /wishes/photo` (multipart، عکس آرزو) → `{photo_id}` · `POST /wishes {title,note?,kind:'dream'|'place'|'goal',photo_id?}` · `PATCH/DELETE /wishes/:id` · `POST /wishes/:id/achieve {achieved}` («رسیدم»؛ مانا اعلان می‌گیرد) · `POST /wishes/board/renew {title?,carry_over?,refresh_months?}` · `PATCH /wishes/board`. کلید دسترسی: `wishes`.
+
+## گزارش هفتگی 🔒
+`GET /reports/weekly[?week_start=YYYY-MM-DD]` (هفته‌ی شنبه تا جمعه، قاعده‌محور). زمان‌بند جمعه ۱۸:۰۰ اعلان `weekly_report` می‌سازد.
+
+## خانه‌داری (ماژول `home`) و پیوست کار
+`/shopping` (CRUD) · `GET /meals?from&to` · `PUT /meals {day,slot:'breakfast|lunch|dinner',title}` (عنوان خالی = حذف) · `GET/POST /tasks/:id/files` · `GET/DELETE /task-files/:id` (PDF/JPEG/PNG/WebP تا ۱۰MB).
+
+## مناسبت‌های سالانه
+`GET /family-dates` · `POST/DELETE /family-dates` 🔒 `{title,kind:'birthday|anniversary|occasion|holiday',jm,jd,person_id?,notify?}`.
+
+## چت: گفتگوی خصوصی
+`GET /chat?peer=<userId>[&after]` · `POST /chat {body, peer_id?}` · `GET /chat/summary` (آخرین پیام هر گفتگو برای نشان خوانده‌نشده). گفتگوی خصوصی فقط برای همان دو نفر خواندنی است.
+
+## ساخت عضو و تنظیمات کودک
+`POST /members` 🔒 `{username,display_name,role:'member'|'child',password,theme?,show_homework?}` · `PATCH /children/:id/settings` فیلدهای تازه: `theme`, `show_homework`, `reflection_stars`.

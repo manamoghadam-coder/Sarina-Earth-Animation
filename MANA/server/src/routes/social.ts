@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireParent, requirePerm, requireUser } from '../auth.ts';
 import { withActor } from '../db.ts';
 import { todayISO } from '../jalali.ts';
+import { notifyChat } from '../scheduler.ts';
 import { zDate, zId } from '../util.ts';
 
 const text = (max: number) => z.string().trim().min(1).max(max);
@@ -79,24 +80,26 @@ export default async function socialRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
-  // ---------------- family chat ----------------
+  // ---------------- family chat: one group + private 1-to-1 conversations (only the two people can read a DM) ----------------
   app.get('/api/chat', { preHandler: requirePerm('chat', 1) }, async (req) => {
-    const { after } = z.object({ after: z.coerce.number().int().min(0).optional() }).parse(req.query);
+    const { after, peer } = z.object({ after: z.coerce.number().int().min(0).optional(), peer: zId.optional() }).parse(req.query);
+    const me = req.actor!.id; const cond = peer ? `peer_id IS NOT NULL AND ((sender_id=$1 AND peer_id=$2) OR (sender_id=$2 AND peer_id=$1))` : `peer_id IS NULL AND $1::uuid IS NOT NULL AND $2::uuid IS NULL`;
+    const cols = 'id, sender_id, peer_id, body, created_at';
     return withActor(req.actor!, async (q) => ({
       people: await q(`SELECT * FROM chat_people()`),
-      messages: after !== undefined
-        ? await q(`SELECT id, sender_id, body, created_at FROM chat_messages WHERE id > $1 ORDER BY id LIMIT 200`, [after])
-        : (await q(`SELECT id, sender_id, body, created_at FROM chat_messages ORDER BY id DESC LIMIT 100`)).reverse(),
+      messages: after !== undefined ? await q(`SELECT ${cols} FROM chat_messages WHERE ${cond} AND id > $3 ORDER BY id LIMIT 200`, [me, peer ?? null, after])
+        : (await q(`SELECT ${cols} FROM chat_messages WHERE ${cond} ORDER BY id DESC LIMIT 100`, [me, peer ?? null])).reverse(),
     }));
   });
-  app.get('/api/chat/unread', { preHandler: requireUser }, async (req) => {
-    const { after } = z.object({ after: z.coerce.number().int().min(0).default(0) }).parse(req.query);
-    const [r] = await withActor(req.actor!, (q) => q(`SELECT count(*)::int AS count, COALESCE(max(id),0) AS last FROM chat_messages WHERE id > $1 AND sender_id <> $2`, [after, req.actor!.id]));
-    return r;
-  });
+  // latest message per conversation (the client compares with what it has already seen)
+  app.get('/api/chat/summary', { preHandler: requireUser }, async (req) => withActor(req.actor!, (q) => q(`
+    SELECT CASE WHEN peer_id IS NULL THEN 'group' WHEN sender_id=$1 THEN peer_id::text ELSE sender_id::text END AS conv, max(id) AS last_id,
+           (array_agg(sender_id = $1 ORDER BY id DESC))[1] AS last_from_me
+    FROM chat_messages GROUP BY 1`, [req.actor!.id])));
   app.post('/api/chat', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } }, preHandler: requirePerm('chat', 2) }, async (req, reply) => {
-    const { body } = z.object({ body: text(2000) }).strict().parse(req.body);
-    const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO chat_messages (sender_id, body) VALUES ($1,$2) RETURNING id, sender_id, body, created_at`, [req.actor!.id, body]));
+    const { body, peer_id } = z.object({ body: text(2000), peer_id: zId.nullish() }).strict().parse(req.body);
+    const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO chat_messages (sender_id, peer_id, body) VALUES ($1,$2,$3) RETURNING id, sender_id, peer_id, body, created_at`, [req.actor!.id, peer_id ?? null, body]));
+    void notifyChat(req.actor!.id, peer_id ?? null, body).catch((e) => req.log.error(e, 'chat notify failed'));
     return reply.code(201).send(r);
   });
   app.delete('/api/chat/:id', { preHandler: requirePerm('chat', 2) }, async (req, reply) => {
@@ -119,7 +122,8 @@ export default async function socialRoutes(app: FastifyInstance) {
     const { answers } = z.object({ answers: z.array(z.object({ q: text(300), kind: z.enum(['text', 'gratitude']).default('text'), a: z.string().trim().max(2000) }).strict()).min(1).max(12) }).strict().parse(req.body);
     if (!answers.some((x) => x.a)) return reply.code(400).send({ error: 'empty' });
     const [r] = await withActor(req.actor!, (q) => q(`INSERT INTO reflection_entries (user_id, day, answers) VALUES ($1,$2,$3) ON CONFLICT (user_id, day) DO UPDATE SET answers=EXCLUDED.answers, updated_at=now() RETURNING id, day, answers`, [req.actor!.id, todayISO(), JSON.stringify(answers)]));
-    return r;
+    const [st] = await withActor(req.actor!, (q) => q(`SELECT claim_reflection_stars() AS stars`));
+    return { ...r, stars: st.stars };
   });
   // history: own, or (Mana) a child's
   app.get('/api/reflection', { preHandler: requirePerm('diary', 1) }, async (req) => {

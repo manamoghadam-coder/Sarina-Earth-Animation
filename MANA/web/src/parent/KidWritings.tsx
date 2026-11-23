@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { fmtDate } from '../jalali';
 import { Empty, Field, Loading, useAction, useLoad } from '../ui';
@@ -14,6 +15,8 @@ export default function KidWritings({ kid, reload }: { kid: any; reload: () => P
     <section className="card"><h2 className="font-bold mb-2">🌙 مرور شبانه‌ی {kid.display_name}</h2>
       <label className="flex items-center gap-2 py-1"><input type="checkbox" className="w-5 h-5" checked={kid.reflection_enabled} onChange={(e) => saveS({ reflection_enabled: e.target.checked })} />هر شب یادآوری و سؤال‌ها فعال باشد</label>
       <Field label="ساعت یادآوری شبانه (باید قبل از «ساعت سکوت» باشد)"><input type="time" className="input !w-40" defaultValue={String(kid.reflection_time).slice(0, 5)} onBlur={(e) => e.target.value && saveS({ reflection_time: e.target.value })} /></Field>
+      <Field label="ستاره‌ی پاداش برای انجام مرور شبانه (۰ = بدون پاداش)"><input type="number" min={0} max={10} className="input !w-28" defaultValue={kid.reflection_stars} onBlur={(e) => +e.target.value !== kid.reflection_stars && saveS({ reflection_stars: +e.target.value })} /></Field>
+      <Link className="btn btn-ghost" to={`/wishes?user=${kid.id}`}>🌠 دیدن تابلو آرزوهای {kid.display_name}</Link>
       <h3 className="font-bold mt-3 mb-1">سؤال‌ها</h3><Loading error={qs.error} loading={qs.loading} />
       {mine.map((q) => <div key={q.id} className="flex items-center gap-2 py-1 border-b border-slate-100 last:border-0">
         <input type="checkbox" className="w-5 h-5" aria-label="فعال" checked={q.active} onChange={(e) => act(async () => { await api(`/reflection-questions/${q.id}`, { method: 'PATCH', body: { active: e.target.checked } }); await qs.reload(); })} />

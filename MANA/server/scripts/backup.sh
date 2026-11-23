@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Nightly backup: DB dump + photo storage. Example cron (03:00): 0 3 * * * /path/to/mana/server/scripts/backup.sh /backups
-# Needs DATABASE_URL_OWNER in the environment. Keep backups encrypted/off-box: they contain private family data.
+# Backup: DB dump (custom format) + photo/file storage. Keeps the last $KEEP_DAYS days (default 30).
+# Usage: backup.sh <backup dir>          Needs DATABASE_URL_OWNER (and optionally STORAGE_DIR) in the environment.
+# Backups contain PRIVATE family data (diaries, messages): keep them off-box too and never share them.
 set -euo pipefail
 OUT="${1:?backup dir}"; STAMP=$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
 pg_dump "$DATABASE_URL_OWNER" --format=custom --file "$OUT/mana-$STAMP.dump"
-tar -C "${STORAGE_DIR:-./storage}" -czf "$OUT/photos-$STAMP.tgz" photos 2>/dev/null || true
-find "$OUT" -name 'mana-*.dump' -mtime +30 -delete; find "$OUT" -name 'photos-*.tgz' -mtime +30 -delete
+if [ -d "${STORAGE_DIR:-./storage}" ]; then tar -C "${STORAGE_DIR:-./storage}" -czf "$OUT/files-$STAMP.tgz" . ; fi
+# retention: old backups beyond KEEP_DAYS days are removed
+find "$OUT" -maxdepth 1 -type f \( -name 'mana-*.dump' -o -name 'files-*.tgz' -o -name 'photos-*.tgz' \) -mtime +"${KEEP_DAYS:-30}" -delete
 echo "backup written to $OUT ($STAMP)"
-# restore: pg_restore --clean --if-exists -d "$DATABASE_URL_OWNER" mana-<stamp>.dump

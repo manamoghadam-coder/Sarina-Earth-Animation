@@ -18,12 +18,18 @@ async function mk(u: string, role: string) {
 }
 const call = (u: string, method: any, url: string, payload?: any) => app.inject({ method, url, headers: { ...H, cookie: jar[u] }, payload });
 
+/** tests share the DB with the real accounts: remove side effects that reach real users (notifications to the real parent, shopping items, meals) */
+async function cleanup() {
+  await sys(`DELETE FROM notifications WHERE (kind IN ('wish_done','chat') AND (title LIKE '%x\\_%' OR title LIKE '%s\\_%')) OR (kind='mom_message' AND body IN ('دوستت دارم','برای همه'))`);
+  await sys(`DELETE FROM shopping_items WHERE title IN ('شیر','نان')`); await sys(`DELETE FROM meals WHERE day='2026-11-25'`);
+}
 before(async () => {
   app = await buildApp();
   await sys(`DELETE FROM users WHERE username LIKE 's\\_%'`);
   await mk('s_mom', 'parent'); await mk('s_kid', 'child'); await mk('s_kid2', 'child'); await mk('s_dad', 'member');
 });
-after(async () => { await sys(`DELETE FROM users WHERE username LIKE 's\\_%'`); await app.close(); await sysPool.end(); await appPool.end(); });
+after(async () => { await sys(`DELETE FROM users WHERE username LIKE 's\\_%'`);
+  await cleanup(); await app.close(); await sysPool.end(); await appPool.end(); });
 
 test('diary: Mana can READ (not edit) children diaries; siblings and other adults cannot; adult diaries stay private', async () => {
   const c = await call('s_kid', 'POST', '/api/diary', { title: 'امروز', body: 'راز من', mood: '😊' });

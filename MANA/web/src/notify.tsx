@@ -26,9 +26,12 @@ export function NotificationCenter({ speakAloud, kid, paused }: { speakAloud: bo
       {speakAloud && <button aria-label="دوباره بخوان" className="btn btn-ghost !px-3" onClick={() => speak(cur.voice_text ?? cur.body)}>🔊</button>}</div>
     <div className="flex gap-2 mt-3 flex-wrap">
       {(cur.ref_type === 'activity' || cur.ref_type === 'task') && <button className="btn btn-teal flex-1" onClick={() => act('done')}>انجام شد ✅</button>}
+      {cur.ref_type === 'chat' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/chat'); }}>💬 باز کن</button>}
+      {cur.ref_type === 'weekly_report' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/report'); }}>📊 ببین</button>}
+      {cur.ref_type === 'wishes' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/wishes'); }}>🌠 تابلو</button>}
       {cur.ref_type === 'reflection' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/night'); }}>🌙 شروع</button>}
       {cur.ref_type === 'mom_message' && <button className="btn btn-teal flex-1" onClick={async () => { await act('seen'); go('/messages'); }}>💌 بخوان</button>}
-      {cur.ref_type !== 'mom_message' && <button className="btn btn-ghost flex-1" onClick={() => act('snooze')}>۱۰ دقیقه بعد ⏰</button>}
+      {!['mom_message', 'chat', 'weekly_report', 'family_date', 'wishes'].includes(cur.ref_type ?? '') && <button className="btn btn-ghost flex-1" onClick={() => act('snooze')}>۱۰ دقیقه بعد ⏰</button>}
       <button className="btn btn-ghost flex-1" onClick={() => act('seen')}>باشه</button></div>
     {queue.length > 1 && <p className="text-xs text-slate-500 mt-2">{queue.length - 1} اعلان دیگر</p>}</div>;
 }

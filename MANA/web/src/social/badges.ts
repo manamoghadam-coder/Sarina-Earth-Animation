@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useAuth } from '../auth';
-import { getChatSeen } from './Chat';
+import { unreadConvs } from './Chat';
 
 /** Unread counters for chat and Mom's messages (polled while the app is open). */
 export function useUnread() {
@@ -9,7 +9,7 @@ export function useUnread() {
   useEffect(() => {
     if (!me) return; let dead = false;
     const tick = async () => {
-      try { if ((me.permissions.chat ?? 0) >= 1) { const r = await api<{ count: number }>(`/chat/unread?after=${getChatSeen(me.id)}`); if (!dead) setChat(r.count); } } catch { /* offline */ }
+      try { if ((me.permissions.chat ?? 0) >= 1) { const r = await api<any[]>('/chat/summary'); if (!dead) setChat(unreadConvs(me.id, r).length); } } catch { /* offline */ }
       try { if (me.role !== 'parent' && (me.permissions.inbox ?? 0) >= 1) { const r = await api<{ count: number }>('/mom-messages/unread'); if (!dead) setInbox(r.count); } } catch { /* offline */ }
     };
     void tick(); const t = setInterval(tick, 15000);

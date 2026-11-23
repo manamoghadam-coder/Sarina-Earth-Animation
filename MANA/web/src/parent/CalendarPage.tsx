@@ -2,19 +2,22 @@ import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { MONTHS, WEEKDAYS, addDays, fa, fmtDate, fmtInstant, isoFromJ, jmLen, parts, tehranIso, tehranToday, wd } from '../jalali';
 import { DateField, Field, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
+import FamilyDates, { FD_ICON } from './FamilyDates';
+import { useAuth } from '../auth';
 
 const KIND: Record<string, string> = { meeting: 'جلسه', family: 'خانوادگی', birthday: 'تولد', occasion: 'مناسبت', other: 'سایر' };
 export default function CalendarPage() {
   const today = tehranToday(); const t = parts(today);
   const [ym, setYm] = useState({ jy: t.jy, jm: t.jm }); const [view, setView] = useState<'month' | 'week'>('month'); const [sel, setSel] = useState(today); const [edit, setEdit] = useState<any | null>(null); const act = useAction();
-  const events = useLoad(() => api<any[]>('/events')); const tasks = useLoad(() => api<any[]>('/tasks')); const debts = useLoad(() => api<any[]>('/debts'));
+  const events = useLoad(() => api<any[]>('/events')); const tasks = useLoad(() => api<any[]>('/tasks')); const debts = useLoad(() => api<any[]>('/debts')); const fds = useLoad(() => api<any[]>('/family-dates')); const { me } = useAuth();
   const byDay = useMemo(() => {
     const m: Record<string, { label: string; kind: string }[]> = {}; const add = (d: string, label: string, kind: string) => (m[d] ||= []).push({ label, kind });
     events.data?.forEach((e) => { const x = fmtInstant(e.starts_at); add(x.date, `${fa(x.time)} ${e.title}`, 'event'); });
     tasks.data?.filter((x) => x.due_date && !['done', 'cancelled'].includes(x.status)).forEach((x) => add(x.due_date, `✅ ${x.title}`, 'task'));
     debts.data?.filter((x) => x.next_due_date && x.status === 'open').forEach((x) => add(x.next_due_date, `💳 ${x.title}`, 'debt'));
+    fds.data?.forEach((f) => { for (const jy of new Set([t.jy - 1, t.jy, t.jy + 1, ym.jy])) add(isoFromJ(jy, f.jm, Math.min(f.jd, jmLen(jy, f.jm))), `${FD_ICON[f.kind]} ${f.title}`, 'fd'); });
     return m;
-  }, [events.data, tasks.data, debts.data]);
+  }, [events.data, tasks.data, debts.data, fds.data, ym.jy]);
   const first = isoFromJ(ym.jy, ym.jm, 1); const lead = wd(first); const len = jmLen(ym.jy, ym.jm);
   const step = (n: number) => { let m = ym.jm + n, y = ym.jy; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } setYm({ jy: y, jm: m }); };
   const weekStart = addDays(sel, -wd(sel));
@@ -33,6 +36,7 @@ export default function CalendarPage() {
       {events.data?.filter((e) => fmtInstant(e.starts_at).date === sel).map((e) => { const x = fmtInstant(e.starts_at); return <div key={e.id} className="flex justify-between items-center border-t border-slate-100 mt-2 pt-2"><span>{e.title} <span className="chip">{KIND[e.kind]}</span> {fa(x.time)}</span>
         <span className="flex gap-1"><button className="btn btn-ghost !py-1" onClick={() => setEdit({ id: e.id, title: e.title, kind: e.kind, date: x.date, time: x.time, remind: e.remind_minutes?.[0] ?? 30 })}>ویرایش</button>
           <button className="btn btn-ghost !py-1" aria-label="حذف" onClick={() => confirm('حذف شود؟') && act(async () => { await api(`/events/${e.id}`, { method: 'DELETE' }); await events.reload(); })}>🗑</button></span></div>; })}</section>
+    <FamilyDates dates={fds.data ?? []} reload={fds.reload} canWrite={me!.role === 'parent'} />
     {edit && <Modal title={edit.id ? 'ویرایش رویداد' : 'رویداد جدید'} onClose={() => setEdit(null)}>
       <Field label="عنوان"><input className="input" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} /></Field>
       <Field label="نوع"><select className="input" value={edit.kind} onChange={(e) => setEdit({ ...edit, kind: e.target.value })}>{Object.entries(KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>

@@ -21,6 +21,13 @@ services:
       VAPID_SUBJECT: "${VAPID_SUBJECT}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       NODE_ENV: production
+  backup:                                   # daily dump at ~03:00 (container time) into the "backups" volume; 30 days kept (see server/scripts/backup.sh)
+    image: postgres:16
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment: { DATABASE_URL_OWNER: "postgres://mana_owner:${OWNER_DB_PASSWORD}@db:5432/mana", STORAGE_DIR: /storage, KEEP_DAYS: "30" }
+    volumes: [ "backups:/backups", "photos:/storage:ro", "../server/scripts/backup.sh:/backup.sh:ro" ]
+    entrypoint: ["bash", "-c", "while true; do now=$$(date +%s); next=$$(date -d 'tomorrow 03:00' +%s); sleep $$((next-now)); bash /backup.sh /backups || echo BACKUP FAILED; done"]
   caddy:
     image: caddy:2
     ports: [ "80:80", "443:443" ]
@@ -28,4 +35,4 @@ services:
     volumes: [ "./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data" ]
     depends_on: [ mana ]
     restart: unless-stopped
-volumes: { pgdata: {}, photos: {}, caddy_data: {} }
+volumes: { pgdata: {}, photos: {}, caddy_data: {}, backups: {} }

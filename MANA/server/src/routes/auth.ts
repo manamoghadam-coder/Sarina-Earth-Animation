@@ -64,6 +64,19 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!r.active) await revokeAll(id);
     return r;
   });
+  // Mana creates a new account (adult member or child). Passwords are never emailed; Mana hands them over.
+  app.post('/api/members', { preHandler: requireParent }, async (req, reply) => {
+    const b = z.object({ username: z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9_.-]{2,31}$/), display_name: z.string().trim().min(1).max(40), role: z.enum(['member', 'child']),
+      password: z.string().min(8).max(100), theme: z.enum(['sarina', 'saman']).default('sarina'), show_homework: z.boolean().default(false) }).strict().parse(req.body);
+    const hash = await hashPassword(b.password);
+    const r = await withActor(req.actor!, async (q) => {
+      const [u] = await q(`INSERT INTO users (username, display_name, role, password_hash, permissions) VALUES ($1,$2,$3,$4,'{}') RETURNING id, username, display_name, role, active, permissions`, [b.username, b.display_name, b.role, hash]);
+      if (b.role === 'child') await q(`INSERT INTO child_settings (child_id, theme, show_homework) VALUES ($1,$2,$3)`, [u.id, b.theme, b.show_homework]);
+      await q(`INSERT INTO audit_log (user_id, action, detail) VALUES ($1,'member_created',$2)`, [req.actor!.id, { member: u.id, role: b.role }]);
+      return u;
+    });
+    return reply.code(201).send(r);
+  });
   app.post('/api/members/:id/password', { preHandler: requireParent }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { password } = z.object({ password: z.string().min(8).max(100) }).strict().parse(req.body);

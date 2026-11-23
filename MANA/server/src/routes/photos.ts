@@ -9,14 +9,14 @@ import { requirePerm, requireUser } from '../auth.ts';
 import { withActor } from '../db.ts';
 import { zId } from '../util.ts';
 
-const MAX = 8 * 1024 * 1024;
-function sniff(b: Buffer): { mime: string; ext: string } | null {
+export const MAX = 8 * 1024 * 1024;
+export function sniff(b: Buffer): { mime: string; ext: string } | null {
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: 'image/jpeg', ext: 'jpg' };
   if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { mime: 'image/png', ext: 'png' };
   if (b.subarray(0, 4).toString() === 'RIFF' && b.subarray(8, 12).toString() === 'WEBP') return { mime: 'image/webp', ext: 'webp' };
   return null;
 }
-const dir = () => { const d = path.resolve(config.storageDir, 'photos'); fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; };
+export const dir = () => { const d = path.resolve(config.storageDir, 'photos'); fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; };
 
 export default async function photoRoutes(app: FastifyInstance) {
   app.post('/api/users/:id/photos', { preHandler: requirePerm('photos', 2) }, async (req, reply) => {
@@ -37,7 +37,7 @@ export default async function photoRoutes(app: FastifyInstance) {
   });
   app.get('/api/photos', { preHandler: requireUser }, async (req) => {
     const owner = req.actor!.role === 'child' ? req.actor!.id : zId.parse((req.query as any).owner_id);
-    return withActor(req.actor!, (q) => q(`SELECT id, caption, created_at FROM photos WHERE owner_id=$1 ORDER BY created_at DESC`, [owner]));
+    return withActor(req.actor!, (q) => q(`SELECT id, caption, created_at FROM photos WHERE owner_id=$1 AND kind='gallery' ORDER BY created_at DESC`, [owner]));
   });
   app.get('/api/photos/:id/file', { preHandler: requireUser }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
@@ -72,7 +72,7 @@ export default async function photoRoutes(app: FastifyInstance) {
       fs.writeFileSync(path.join(dir(), name), buf, { mode: 0o600 });
       try {
         const id = await withActor(req.actor!, async (q) => {
-          const [p] = await q(`INSERT INTO photos (owner_id,file_name,mime,bytes,caption,uploaded_by) VALUES ($1,$2,$3,$4,'پروفایل',$1) RETURNING id`, [me, name, kind.mime, buf.length]);
+          const [p] = await q(`INSERT INTO photos (owner_id,file_name,mime,bytes,caption,uploaded_by,kind) VALUES ($1,$2,$3,$4,'پروفایل',$1,'avatar') RETURNING id`, [me, name, kind.mime, buf.length]);
           const [ok] = await q(`SELECT set_my_avatar($1) AS ok`, [p.id]);
           if (!ok.ok) throw Object.assign(new Error('forbidden'), { code: '42501' });
           return p.id as string;
