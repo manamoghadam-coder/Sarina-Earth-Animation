@@ -1,0 +1,5 @@
+parts/
+log_*.txt
+__pycache__/
+mix.wav
+*.mp4
