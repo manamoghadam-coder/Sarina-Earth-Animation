@@ -25,7 +25,7 @@ const upload = (u: string, url: string, file: Buffer, name = 'a.png', type = 'im
 /** tests share the DB with the real accounts: remove side effects that reach real users (notifications to the real parent, shopping items, meals) */
 async function cleanup() {
   await sys(`DELETE FROM notifications WHERE (kind IN ('wish_done','chat') AND (title LIKE '%x\\_%' OR title LIKE '%s\\_%')) OR (kind='mom_message' AND body IN ('دوستت دارم','برای همه'))`);
-  await sys(`DELETE FROM shopping_items WHERE title IN ('شیر','نان')`); await sys(`DELETE FROM meals WHERE day='2026-11-25'`);
+  await sys(`DELETE FROM shopping_items WHERE title IN ('شیر','نان')`); await sys(`DELETE FROM meals WHERE day='2030-01-05'`);
 }
 before(async () => {
   app = await buildApp();
@@ -92,8 +92,8 @@ test('home module: shopping list and meal plan need the "home" permission; task 
   assert.equal((await call('x_dad', 'GET', '/api/shopping')).statusCode, 403);
   const it = await call('x_mom', 'POST', '/api/shopping', { title: 'شیر', qty: '۲ بسته' }); assert.equal(it.statusCode, 201, it.body);
   assert.equal((await call('x_mom', 'PATCH', `/api/shopping/${it.json().id}`, { done: true })).statusCode, 200);
-  assert.equal((await call('x_mom', 'PUT', '/api/meals', { day: '2026-11-25', slot: 'dinner', title: 'قورمه‌سبزی' })).statusCode, 200);
-  assert.equal((await call('x_mom', 'GET', '/api/meals?from=2026-11-21&to=2026-11-27')).json().length, 1);
+  assert.equal((await call('x_mom', 'PUT', '/api/meals', { day: '2030-01-05', slot: 'dinner', title: 'قورمه‌سبزی' })).statusCode, 200);
+  assert.equal((await call('x_mom', 'GET', '/api/meals?from=2030-01-01&to=2030-01-07')).json().length, 1);
   await call('x_mom', 'PATCH', `/api/members/${ids.x_dad}`, { permissions: { home: 1, tasks: 2 } });
   assert.equal((await call('x_dad', 'GET', '/api/shopping')).statusCode, 200);
   assert.equal((await call('x_dad', 'POST', '/api/shopping', { title: 'نان' })).statusCode, 403);
