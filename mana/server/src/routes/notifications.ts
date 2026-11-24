@@ -36,10 +36,12 @@ export default async function notificationRoutes(app: FastifyInstance) {
   app.post('/api/notifications/:id/done', { preHandler: requireUser }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     return withActor(req.actor!, async (q) => {
-      const [n] = await q(`UPDATE notifications SET done_at=now(), seen_at=COALESCE(seen_at, now()) WHERE id=$1 AND user_id=$2 RETURNING ref_type, ref_id, ref_day`, [id, req.actor!.id]);
+      const [n] = await q(`UPDATE notifications SET done_at=now(), seen_at=COALESCE(seen_at, now()) WHERE id=$1 AND user_id=$2 RETURNING ref_type, ref_id, ref_day, ref_slot`, [id, req.actor!.id]);
       if (!n) return reply.code(404).send({ error: 'not_found' });
       if (n.ref_type === 'activity' && req.actor!.role === 'child')
         await q(`INSERT INTO completions (activity_id, child_id, day) VALUES ($1,$2,$3) ON CONFLICT (activity_id, day) DO NOTHING`, [n.ref_id, req.actor!.id, n.ref_day ?? todayISO()]);
+      if (n.ref_type === 'routine' && req.actor!.role === 'child')
+        await q(`INSERT INTO routine_logs (routine_id, child_id, day, slot) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [n.ref_id, req.actor!.id, n.ref_day ?? todayISO(), n.ref_slot ?? '']);
       if (n.ref_type === 'task' && req.actor!.role === 'parent') await q(`UPDATE tasks SET status='done', done_at=now() WHERE id=$1`, [n.ref_id]);
       return { ok: true, awaiting_approval: n.ref_type === 'activity' && req.actor!.role === 'child' };
     });

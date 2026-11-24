@@ -1,3 +1,3 @@
-{ "name": "MANA | دستیار اجرایی زندگی و خانواده", "short_name": "MANA", "lang": "fa", "dir": "rtl", "start_url": "/", "scope": "/", "display": "standalone",
+{ "name": "دنیای کوچک ما | Our Little World", "short_name": "دنیای ما", "lang": "fa", "dir": "rtl", "start_url": "/", "scope": "/", "display": "standalone",
   "background_color": "#3b1f78", "theme_color": "#3b1f78",
   "icons": [ { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" }, { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" } ] }

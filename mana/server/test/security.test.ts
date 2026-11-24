@@ -4,7 +4,7 @@ import { buildApp } from '../src/app.ts';
 import { sys, sysPool, appPool, withActor } from '../src/db.ts';
 import { hashPassword } from '../src/auth.ts';
 import { generate } from '../src/scheduler.ts';
-import { tehranInstant, todayISO, persianWeekday } from '../src/jalali.ts';
+import { tehranInstant, todayISO, persianWeekday, toJalali } from '../src/jalali.ts';
 
 const PW = 'Test-pass-12345';
 let app: Awaited<ReturnType<typeof buildApp>>;
@@ -25,6 +25,7 @@ async function signIn(u: string) {
 const call = (u: string, method: any, url: string, payload?: any) => app.inject({ method, url, headers: { ...H, cookie: jar[u] }, payload });
 
 before(async () => {
+  process.env.LOGIN_RATE_MAX = '1000';
   app = await buildApp();
   await sys(`DELETE FROM users WHERE username LIKE 't\\_%'`);
   await mk('t_mom', 'parent'); await mk('t_sa', 'child'); await mk('t_sm', 'child'); await mk('t_dad', 'member');
@@ -175,4 +176,58 @@ test('member (father): no access by default, Mana grants per module, enforced in
   await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { active: false });
   assert.equal((await call('t_dad', 'GET', '/api/me')).statusCode, 401);
   await sys(`DELETE FROM transactions WHERE note='dad-test'`); await sys(`DELETE FROM events WHERE title='dad-event'`);
+});
+
+test('routines/medicine: Mana configures, child sees only own and logs; reminders fire (medicine ignores quiet hours) and "done" logs', async () => {
+  await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]);
+  const mk1 = await call('t_mom', 'POST', '/api/routines', { child_id: ids.t_sa, kind: 'medicine', title: 'شربت تقویتی', dose: '۵ میلی‌لیتر', times: ['09:00'], icon: '💊' });
+  assert.equal(mk1.statusCode, 201, mk1.body);
+  const rt = JSON.parse(mk1.body);
+  await call('t_mom', 'POST', '/api/routines', { child_id: ids.t_sm, title: 'secret-habit', times: ['08:00'] });
+  const mine = JSON.parse((await call('t_sa', 'GET', '/api/child/routines')).body);
+  assert.ok(mine.some((r: any) => r.title === 'شربت تقویتی') && !mine.some((r: any) => r.title === 'secret-habit'));
+  assert.equal((await call('t_sa', 'POST', '/api/routines', { child_id: ids.t_sa, title: 'x' })).statusCode, 403);       // children cannot define routines
+  assert.equal((await call('t_sa', 'POST', `/api/child/routines/${(await sys(`SELECT id FROM routines WHERE title='secret-habit'`))[0].id}/log`, {})).statusCode, 404);
+  await sys(`UPDATE child_settings SET quiet_start='00:00', quiet_end='23:59' WHERE child_id=$1`, [ids.t_sa]);          // quiet all day
+  const day = todayISO();
+  await generate(tehranInstant(day, '09:01'));
+  const n = await sys(`SELECT id, ref_slot FROM notifications WHERE ref_id=$1`, [rt.id]);
+  assert.equal(n.length, 1); assert.equal(n[0].ref_slot, '09:00');
+  assert.equal((await call('t_sa', 'POST', `/api/notifications/${n[0].id}/done`, {})).statusCode, 200);
+  assert.equal((await sys(`SELECT 1 FROM routine_logs WHERE routine_id=$1 AND slot='09:00'`, [rt.id])).length, 1);
+  const after = JSON.parse((await call('t_sa', 'GET', '/api/child/routines')).body).find((r: any) => r.id === rt.id);
+  assert.equal(after.slots[0].done, true);
+});
+test('purchase requests, suggestions: child can only create own; Mana decides; sibling cannot see', async () => {
+  const r = await call('t_sa', 'POST', '/api/child/requests', { category: 'school', title: 'دفتر نقاشی' }); assert.equal(r.statusCode, 201);
+  const id = JSON.parse(r.body).id;
+  await assert.rejects(withActor({ id: ids.t_sa, role: 'child' }, (q) => q(`INSERT INTO purchase_requests (child_id,title,status) VALUES ($1,'x','approved')`, [ids.t_sa])));   // cannot self-approve
+  await assert.rejects(withActor({ id: ids.t_sa, role: 'child' }, (q) => q(`INSERT INTO purchase_requests (child_id,title) VALUES ($1,'x')`, [ids.t_sm])));     // not for sibling
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/child/requests')).body).length, 0);
+  assert.equal((await call('t_sa', 'POST', `/api/purchase-requests/${id}/decide`, { status: 'approved' })).statusCode, 403);
+  assert.equal((await call('t_mom', 'POST', `/api/purchase-requests/${id}/decide`, { status: 'approved', mom_note: 'فردا' })).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/child/requests')).body)[0].status, 'approved');
+  assert.equal((await call('t_sm', 'POST', '/api/child/suggestions', { kind: 'food', text: 'پیتزا' })).statusCode, 201);
+  assert.equal(JSON.parse((await call('t_mom', 'GET', '/api/suggestions')).body).some((s: any) => s.text === 'پیتزا'), true);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/child/suggestions')).body).length, 0);
+});
+test('occasions: Mana adds birthdays; children see only all/kids; upcoming computes Jalali dates and age; quote of the day by age group', async () => {
+  const { jy, jm, jd } = toJalali(todayISO());
+  const b = await call('t_mom', 'POST', '/api/occasions', { title: 'تولد-تست', kind: 'birthday', jm, jd, birth_jy: jy - 7, audience: 'all' }); assert.equal(b.statusCode, 201, b.body);
+  await call('t_mom', 'POST', '/api/occasions', { title: 'فقط-بزرگ‌ترها', jm, jd, audience: 'adults' });
+  const up = JSON.parse((await call('t_sa', 'GET', '/api/occasions/upcoming?days=5')).body);
+  const bd = up.find((o: any) => o.title === 'تولد-تست'); assert.ok(bd); assert.equal(bd.days_left, 0); assert.equal(bd.age, 7);
+  assert.ok(!up.some((o: any) => o.title === 'فقط-بزرگ‌ترها'));
+  assert.equal((await call('t_sa', 'POST', '/api/occasions', { title: 'x', jm: 1, jd: 1 })).statusCode, 403);
+  const q1 = JSON.parse((await call('t_sa', 'GET', '/api/quote/today')).body); assert.ok(q1.text);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/quote/today')).body).text, q1.text);   // stable within a day
+  await sys(`DELETE FROM occasions WHERE title IN ('تولد-تست','فقط-بزرگ‌ترها')`);
+});
+test('member: finance and debts are separate permissions', async () => {
+  await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]); await signIn('t_dad');
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { finance: 0, debts: 0 } });
+  assert.equal((await call('t_dad', 'GET', '/api/debts')).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { debts: 1 } });
+  assert.equal((await call('t_dad', 'GET', '/api/debts')).statusCode, 200);
+  assert.equal((await call('t_dad', 'GET', '/api/transactions')).statusCode, 403);
 });

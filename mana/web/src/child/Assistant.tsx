@@ -61,6 +61,6 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
       <div className="grid grid-cols-3 gap-3 mt-4"><Q icon="📅" label="برنامه امروزم" cmd="today" /><Q icon="👉" label="الان چیکار کنم؟" cmd="now" /><Q icon="⭐" label="ستاره‌هام" cmd="stars" /><Q icon="🐻" label="قصه بخوان" cmd="story" /><Q icon="✅" label="انجام دادم" cmd="done" /><Q icon="👋" label="سلام" cmd="greet" /></div>
       <form className="flex gap-2 mt-4" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) { void handle(typed); setTyped(''); } }}><input className="input" placeholder="یا اینجا تایپ کن" value={typed} onChange={(e) => setTyped(e.target.value)} /><button className="btn">بفرست</button></form>
       {!sttSupported() && <p className="text-sm text-amber-700 mt-3">⚠️ این مرورگر تشخیص گفتار فارسی ندارد؛ دکمه‌های تصویری و تایپ کار می‌کنند. (برای میکروفون از Chrome روی اندروید استفاده کنید.)</p>}
-      <p className="text-xs text-slate-400 mt-3">میکروفون فقط وقتی دکمه را می‌زنی روشن می‌شود. MANA صدای تو را ضبط یا ذخیره نمی‌کند؛ تشخیص گفتار توسط مرورگر انجام می‌شود.</p>
+      <p className="text-xs text-slate-400 mt-3">میکروفون فقط وقتی دکمه را می‌زنی روشن می‌شود. برنامه صدای تو را ضبط یا ذخیره نمی‌کند؛ تشخیص گفتار توسط مرورگر انجام می‌شود.</p>
     </div></div>;
 }

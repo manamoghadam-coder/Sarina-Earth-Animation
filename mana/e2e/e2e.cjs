@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 // Usage: MANA_URL=http://localhost:8080 PW_MANA=… PW_SARINA=… PW_SAMAN=… node e2e/e2e.cjs <screenshot-dir>
 // Requires `playwright` (npm i -g playwright) and a seeded database (npm run seed in server/). Speech APIs are stubbed.
 const SP = process.argv[2] || '.';
-const URL = process.env.MANA_URL || URL;
+const BASE = process.env.MANA_URL || 'http://localhost:8080';
 const PW = { mana: process.env.PW_MANA, sarina: process.env.PW_SARINA, saman: process.env.PW_SAMAN };
 const stub = () => {
   window.__spoken = [];
@@ -22,7 +22,7 @@ const stub = () => {
     await ctx.addInitScript(stub);
     const page = await ctx.newPage(); const errs = [];
     page.on('pageerror', (e) => errs.push('pageerror ' + e.message)); page.on('console', (m) => m.type() === 'error' && !/40[13]/.test(m.text()) && errs.push('console ' + m.text()));
-    await page.goto(URL + '/'); await page.fill('#u', user); await page.fill('#p', PW[user]); await page.click('button:has-text("ورود")');
+    await page.goto(BASE + '/'); await page.fill('#u', user); await page.fill('#p', PW[user]); await page.click('button:has-text("ورود")');
     return { ctx, page, errs };
   }
   // ---------- Saman (phone) ----------
@@ -36,7 +36,7 @@ const stub = () => {
     ok('saman: tapping icon speaks name+purpose', spoken.some((t) => t.includes('تکالیف من') && t.includes('اینجا می‌توانی تکالیف مدرسه‌ات را ببینی')));
     ok('saman: button still visible after navigation', await btn.isVisible());
     await page.screenshot({ path: `${SP}/saman-homework.png` });
-    await page.goto(URL + '/'); await page.waitForSelector('text=سلام سامان جان');
+    await page.goto(BASE + '/'); await page.waitForSelector('text=سلام سامان جان');
     await page.click('button[aria-label="بشنو: ستاره‌های من"]');
     ok('saman: speaker button speaks stars icon', (await page.evaluate(() => window.__spoken)).some((t) => t.includes('ستاره‌های من. اینجا تعداد ستاره‌هایی')));
     // assistant by voice
@@ -68,12 +68,12 @@ const stub = () => {
     await page.waitForSelector('text=/صبح بخیر|عصر بخیر|شب بخیر/'); await page.waitForTimeout(600); await page.screenshot({ path: `${SP}/mana-dash-mobile.png` });
     ok('mana: pending approval from Saman is shown', await page.locator('text=در انتظار تأیید').first().isVisible());
     ok('mana: fixed assistant button visible', await page.locator('button:has-text("دستیار من 🎙️")').isVisible());
-    await page.goto(URL + '/ai'); await page.fill('input[placeholder^="مثلاً"]', 'فردا ساعت ۱۰ جلسه دارم.'); await page.click('button:has-text("ارسال")'); await page.waitForSelector('text=تأیید و ثبت');
+    await page.goto(BASE + '/ai'); await page.fill('input[placeholder^="مثلاً"]', 'فردا ساعت ۱۰ جلسه دارم.'); await page.click('button:has-text("ارسال")'); await page.waitForSelector('text=تأیید و ثبت');
     await page.screenshot({ path: `${SP}/mana-ai.png` }); await page.click('text=تأیید و ثبت'); await page.waitForSelector('text=رویداد ثبت شد');
     ok('mana: AI proposal -> confirm -> event created', true);
-    await page.goto(URL + '/finance'); await page.waitForSelector('text=مانده نقدینگی'); await page.screenshot({ path: `${SP}/mana-finance.png` });
-    await page.goto(URL + '/family'); await page.waitForSelector('text=برنامه‌ی هفتگی'); await page.screenshot({ path: `${SP}/mana-family.png` });
-    await page.goto(URL + '/calendar'); await page.waitForSelector('text=ماهانه'); await page.screenshot({ path: `${SP}/mana-calendar.png` });
+    await page.goto(BASE + '/finance'); await page.waitForSelector('text=مانده نقدینگی'); await page.screenshot({ path: `${SP}/mana-finance.png` });
+    await page.goto(BASE + '/family'); await page.waitForSelector('text=برنامه‌ی هفتگی'); await page.screenshot({ path: `${SP}/mana-family.png` });
+    await page.goto(BASE + '/calendar'); await page.waitForSelector('text=ماهانه'); await page.screenshot({ path: `${SP}/mana-calendar.png` });
     ok('mana: no horizontal scroll on phone', await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1));
     ok('mana: no console/page errors', errs.length === 0); if (errs.length) console.log(errs);
   }

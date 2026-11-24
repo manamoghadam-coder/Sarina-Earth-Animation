@@ -17,5 +17,6 @@ await sysPool.query(`
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mana_app;
   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO mana_app;
   REVOKE ALL ON sessions, schema_migrations FROM mana_app;`);
+const { seedContent } = await import('./seed-content.ts'); await seedContent();
 console.log('migrations OK');
 await sysPool.end();

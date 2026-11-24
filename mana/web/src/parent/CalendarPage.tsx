@@ -1,9 +1,28 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api';
 import { MONTHS, WEEKDAYS, addDays, fa, fmtDate, fmtInstant, isoFromJ, jmLen, parts, tehranIso, tehranToday, wd } from '../jalali';
+import { useLevel } from '../auth';
 import { DateField, Field, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const KIND: Record<string, string> = { meeting: 'جلسه', family: 'خانوادگی', birthday: 'تولد', occasion: 'مناسبت', other: 'سایر' };
+const OKIND: Record<string, string> = { birthday: '🎂 تولد', family: '👨‍👩‍👧‍👦 خانوادگی', iranian: '🇮🇷 ایرانی', school: '🏫 مدرسه', other: 'سایر' };
+function Occasions() {
+  const list = useLoad(() => api<any[]>('/occasions')); const up = useLoad(() => api<any[]>('/occasions/upcoming?days=366')); const [e, setE] = useState<any | null>(null); const act = useAction(); const lv = useLevel('events');
+  return <section className="card mt-4"><div className="flex justify-between items-center mb-2"><h2 className="font-bold">🎉 مناسبت‌ها و تولدها (هر سال تکرار می‌شود)</h2>{lv >= 2 && <button className="btn btn-teal !py-1" onClick={() => setE({ title: '', kind: 'birthday', jm: 1, jd: 1, birth_jy: '', icon: '🎂', audience: 'all', active: true })}>＋ افزودن</button>}</div>
+    <p className="text-xs text-slate-500 mb-2">تولدها و مناسبت‌های خانوادگی را خودتان اضافه کنید؛ تاریخ‌های رسمی ایرانی پیش‌فرض (شمسی) آمده‌اند و قابل ویرایش و حذف‌اند. مناسبت‌های قمری عمداً اضافه نشده‌اند. بچه‌ها مناسبت‌های «همه/کودکان» را روی صفحه‌ی خانه می‌بینند.</p>
+    {up.data?.slice(0, 6).map((o) => <div key={o.id} className="flex justify-between py-1 text-sm"><span>{o.icon} {o.title}{o.age ? ` (${fa(o.age)} سالگی)` : ''}</span><span className="text-slate-500">{fmtDate(o.date, false)} · {o.days_left === 0 ? 'امروز' : `${fa(o.days_left)} روز دیگر`}</span></div>)}
+    <details className="mt-2"><summary className="cursor-pointer text-sm underline">همه‌ی مناسبت‌ها ({list.data?.length ?? 0})</summary>
+      {list.data?.map((o) => <button key={o.id} className={`w-full text-start flex justify-between py-1.5 border-b border-slate-100 ${o.active ? '' : 'opacity-40'}`} onClick={() => lv >= 2 && setE({ ...o, birth_jy: o.birth_jy ?? '' })}><span>{o.icon} {o.title} <span className="chip">{OKIND[o.kind]}</span></span><span className="text-sm text-slate-500">{fa(o.jd)} {MONTHS[o.jm - 1]}</span></button>)}</details>
+    {e && <Modal title={e.id ? 'ویرایش مناسبت' : 'مناسبت جدید'} onClose={() => setE(null)}>
+      <Field label="عنوان (مثلاً تولد سارینا)"><input className="input" value={e.title} onChange={(x) => setE({ ...e, title: x.target.value })} /></Field>
+      <div className="grid grid-cols-2 gap-2"><Field label="نوع"><select className="input" value={e.kind} onChange={(x) => setE({ ...e, kind: x.target.value })}>{Object.entries(OKIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field><Field label="آیکون"><input className="input" value={e.icon} onChange={(x) => setE({ ...e, icon: x.target.value })} /></Field>
+        <Field label="ماه"><select className="input" value={e.jm} onChange={(x) => setE({ ...e, jm: +x.target.value })}>{MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}</select></Field><Field label="روز"><input type="number" min={1} max={31} className="input" value={e.jd} onChange={(x) => setE({ ...e, jd: +x.target.value })} /></Field></div>
+      {e.kind === 'birthday' && <Field label="سال تولد شمسی (برای نمایش سن؛ مثلاً ۱۳۹۲)"><input type="number" className="input" value={e.birth_jy} onChange={(x) => setE({ ...e, birth_jy: x.target.value === '' ? '' : +x.target.value })} /></Field>}
+      <Field label="چه کسانی ببینند"><select className="input" value={e.audience} onChange={(x) => setE({ ...e, audience: x.target.value })}><option value="all">همه</option><option value="kids">بچه‌ها و بزرگ‌ترها</option><option value="adults">فقط بزرگ‌ترها</option></select></Field>
+      <div className="flex gap-2"><button className="btn btn-teal flex-1" disabled={!e.title.trim()} onClick={() => act(async () => { const b = { title: e.title, kind: e.kind, jm: e.jm, jd: e.jd, birth_jy: e.birth_jy === '' ? null : e.birth_jy, icon: e.icon || '🎉', audience: e.audience, active: true }; e.id ? await api(`/occasions/${e.id}`, { method: 'PATCH', body: b }) : await api('/occasions', { body: b }); setE(null); await list.reload(); await up.reload(); }, 'ذخیره شد')}>ذخیره</button>
+        {e.id && <button className="btn btn-danger" onClick={() => confirm('حذف شود؟') && act(async () => { await api(`/occasions/${e.id}`, { method: 'DELETE' }); setE(null); await list.reload(); await up.reload(); })}>حذف</button>}</div></Modal>}</section>;
+}
+
 export default function CalendarPage() {
   const today = tehranToday(); const t = parts(today);
   const [ym, setYm] = useState({ jy: t.jy, jm: t.jm }); const [view, setView] = useState<'month' | 'week'>('month'); const [sel, setSel] = useState(today); const [edit, setEdit] = useState<any | null>(null); const act = useAction();
@@ -41,5 +60,6 @@ export default function CalendarPage() {
         <Field label="یادآوری (دقیقه قبل)"><input type="number" min={0} className="input" value={edit.remind} onChange={(e) => setEdit({ ...edit, remind: +e.target.value })} /></Field></div>
       <button className="btn btn-teal w-full" disabled={!edit.title.trim() || !edit.time} onClick={() => act(async () => { const b = { title: edit.title, kind: edit.kind, starts_at: tehranIso(edit.date, edit.time), remind_minutes: [edit.remind] };
         edit.id ? await api(`/events/${edit.id}`, { method: 'PATCH', body: b }) : await api('/events', { body: b }); setEdit(null); await events.reload(); }, 'ذخیره شد')}>ذخیره</button></Modal>}
+    <Occasions />
   </div>;
 }

@@ -26,7 +26,7 @@ export default function AIPage() {
   };
   useEffect(() => { if (q.get('mic') === '1') mic(); /* eslint-disable-next-line */ }, []);
   return <div className="flex flex-col" style={{ minHeight: 'calc(100vh - 14rem)' }}>
-    <h1 className="text-xl font-extrabold mb-1">🤖 MANA AI</h1><p className="text-sm text-slate-500 mb-3">تشخیص فارسی تاریخ، ساعت و مبلغ — قبل از هر ثبت، تأیید می‌گیرد.</p>
+    <h1 className="text-xl font-extrabold mb-1">🤖 دستیار هوشمند</h1><p className="text-sm text-slate-500 mb-3">تشخیص فارسی تاریخ، ساعت و مبلغ — قبل از هر ثبت، تأیید می‌گیرد.</p>
     <div className="flex-1 space-y-2" aria-live="polite">{msgs.map((m, i) => <div key={i} className={`max-w-[85%] rounded-2xl px-4 py-2 whitespace-pre-line ${m.who === 'me' ? 'bg-navy-800 text-white me-auto' : 'bg-white border border-slate-200 ms-auto'}`} style={{ marginInlineStart: m.who === 'me' ? 0 : 'auto', marginInlineEnd: m.who === 'me' ? 'auto' : 0 }}>
       {m.text}{m.proposal && !m.done && <div className="flex gap-2 mt-2"><button className="btn btn-teal !py-1" onClick={() => decide(i, true)}>تأیید و ثبت</button><button className="btn btn-ghost !py-1" onClick={() => decide(i, false)}>لغو</button></div>}
       {m.who === 'ai' && <button aria-label="بخوان" className="text-xs text-slate-400 ms-2" onClick={() => speak(m.text)}>🔊</button>}</div>)}<div ref={end} /></div>

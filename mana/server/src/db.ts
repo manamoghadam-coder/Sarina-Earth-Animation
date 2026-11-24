@@ -4,6 +4,7 @@ import { config } from './config.ts';
 pg.types.setTypeParser(20, (v) => Number(v));           // bigint -> number (amounts fit in 2^53)
 pg.types.setTypeParser(1082, (v) => v);                 // date -> 'YYYY-MM-DD' string
 pg.types.setTypeParser(1083, (v) => v.slice(0, 5));     // time -> 'HH:MM'
+pg.types.setTypeParser(1183 as any, (v) => (v === '{}' ? [] : v.slice(1, -1).split(',').map((x) => x.slice(0, 5))));   // time[] -> ['HH:MM']
 
 /** Request pool: connects as mana_app (RLS enforced). */
 export const appPool = new pg.Pool({ connectionString: config.dbUrl, max: 10 });

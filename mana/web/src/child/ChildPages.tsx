@@ -15,14 +15,19 @@ const TILES = [
   { to: '/stories', icon: '🐻', title: 'قصه‌های من', desc: 'اینجا می‌توانی قصه‌های جالب گوش کنی.', c: 'var(--k4)' },
   { to: '/stars', icon: '⭐', title: 'ستاره‌های من', desc: 'اینجا تعداد ستاره‌هایی را که جمع کرده‌ای می‌بینی.', c: 'var(--k2)' },
   { to: '/week', icon: '🗓️', title: 'برنامه هفته', desc: 'اینجا برنامه‌ی کل هفته‌ات را می‌بینی.', c: 'var(--k1)' },
+  { to: '/habits', icon: '🪥', title: 'عادت‌های من', desc: 'اینجا عادت‌های خوبت و داروهایت را تیک می‌زنی.', c: 'var(--k4)' },
+  { to: '/requests', icon: '🛍️', title: 'درخواست خرید', desc: 'اینجا از مامان چیزهایی را که لازم داری می‌خواهی.', c: 'var(--k2)' },
+  { to: '/suggest', icon: '💡', title: 'پیشنهاد من', desc: 'اینجا غذا یا تفریح مورد علاقه‌ات را پیشنهاد می‌دهی.', c: 'var(--k1)' },
   { to: '/gallery', icon: '🖼️', title: 'عکس‌های من', desc: 'اینجا عکس‌های خودت را می‌بینی.', c: 'var(--k3)' },
 ];
 export function Home() {
   const { me } = useAuth(); const go = useNavigate(); const photos = useLoad(() => api<any[]>('/photos')); const today = useLoad(() => api<any>('/child/today'));
-  const tiles = me!.username === 'saman' ? TILES : TILES.filter((t) => t.to !== '/homework');
-  const [tested, setTested] = useState(false);
-  useReadable(tiles.map((t) => `${t.title}. ${t.desc}`));
+  const tiles = me!.age_group === 'young' ? TILES : TILES.filter((t) => t.to !== '/homework');
+  const [tested, setTested] = useState(false); const quote = useLoad(() => api<{ text: string | null }>('/quote/today')); const occ = useLoad(() => api<any[]>('/occasions/upcoming?days=30'));
+  useReadable([...(quote.data?.text ? [`جمله‌ی امروز: ${quote.data.text}`] : []), ...tiles.map((t) => `${t.title}. ${t.desc}`)]);
   return <>
+    {quote.data?.text && <div className="quote-card" role="note"><div className="text-sm opacity-80">✨ جمله‌ی امروز</div><p className="text-xl font-bold leading-9 mt-1">{quote.data.text}</p><button className="text-sm underline mt-1" onClick={() => speak(quote.data!.text!)}>🔊 بشنو</button></div>}
+    {occ.data && occ.data.length > 0 && <div className="kid-card"><b className="text-lg">🎉 مناسبت‌های نزدیک</b>{occ.data.slice(0, 3).map((o) => <div key={o.id} className="flex items-center gap-2 py-1 text-lg"><span className="text-3xl">{o.icon}</span><span className="flex-1">{o.title}{o.age ? ` (${fa(o.age)} سالگی)` : ''}</span><span className="opacity-70 text-sm">{o.days_left === 0 ? 'امروز!' : o.days_left === 1 ? 'فردا' : `${fa(o.days_left)} روز دیگر`}</span></div>)}</div>}
     {photos.data && photos.data.length > 0 && <div className="flex gap-2 overflow-x-auto pb-1" aria-label="عکس‌های من">{photos.data.slice(0, 6).map((p) => <img key={p.id} src={photoUrl(p.id)} alt="" className="h-28 w-28 rounded-3xl object-cover flex-none shadow" />)}</div>}
     {today.data && <div className="kid-card flex items-center justify-between text-xl"><span>⭐ {fa(today.data.balance)} ستاره</span><span className="text-sm opacity-70">این هفته {fa(today.data.week_stars)} از {fa(today.data.settings.weekly_goal_stars)}</span></div>}
     <div className="grid grid-cols-2 gap-4">{tiles.map((t) => <div key={t.to} className="relative">

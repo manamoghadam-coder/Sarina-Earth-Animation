@@ -1,0 +1,100 @@
+[
+ {
+  "title": "نوروز (اول فروردین)",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 1,
+  "icon": "🌱"
+ },
+ {
+  "title": "نوروز (دوم فروردین)",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 2,
+  "icon": "🌱"
+ },
+ {
+  "title": "نوروز (سوم فروردین)",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 3,
+  "icon": "🌱"
+ },
+ {
+  "title": "نوروز (چهارم فروردین)",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 4,
+  "icon": "🌱"
+ },
+ {
+  "title": "روز جمهوری اسلامی",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 12,
+  "icon": "🇮🇷"
+ },
+ {
+  "title": "سیزده‌بدر",
+  "kind": "iranian",
+  "jm": 1,
+  "jd": 13,
+  "icon": "🌳"
+ },
+ {
+  "title": "روز بزرگداشت سعدی",
+  "kind": "iranian",
+  "jm": 2,
+  "jd": 1,
+  "icon": "📜"
+ },
+ {
+  "title": "روز معلم",
+  "kind": "iranian",
+  "jm": 2,
+  "jd": 12,
+  "icon": "👩‍🏫"
+ },
+ {
+  "title": "روز بزرگداشت فردوسی",
+  "kind": "iranian",
+  "jm": 2,
+  "jd": 25,
+  "icon": "📖"
+ },
+ {
+  "title": "روز بزرگداشت خیام",
+  "kind": "iranian",
+  "jm": 2,
+  "jd": 28,
+  "icon": "🌹"
+ },
+ {
+  "title": "روز بزرگداشت حافظ",
+  "kind": "iranian",
+  "jm": 7,
+  "jd": 20,
+  "icon": "📜"
+ },
+ {
+  "title": "شب یلدا",
+  "kind": "iranian",
+  "jm": 9,
+  "jd": 30,
+  "icon": "🍉"
+ },
+ {
+  "title": "روز درختکاری",
+  "kind": "iranian",
+  "jm": 12,
+  "jd": 15,
+  "icon": "🌳"
+ },
+ {
+  "title": "پایان سال",
+  "kind": "iranian",
+  "jm": 12,
+  "jd": 29,
+  "icon": "🎆"
+ }
+]

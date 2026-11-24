@@ -55,3 +55,17 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 ## حساب‌های عضو بزرگسال (🔒 فقط مانا)
 `GET /members` · `PATCH /members/:id {permissions:{tasks?:0-2,events?,finance?,goals?,children?,photos?}, active?}` · `POST /members/:id/password {password}`.
 مسیرهای ماژول‌ها (مثل `/tasks`، `/finance/summary`، `/children`، `/photos`) برای عضو بر اساس سطح (۱ خواندن، ۲ نوشتن) مجازند؛ `/me` فیلد `permissions` را برمی‌گرداند.
+
+## مرحله‌ی ۱ تکمیلی: عادت‌ها و دارو، درخواست‌ها، پیشنهادها، مناسبت‌ها، جمله‌ی روز
+| مسیر | شرح |
+|---|---|
+| CRUD 🔒 `/routines?child_id` | عادت یا دارو (`kind`، `times` ساعت‌ها، `weekdays`، `start_date/end_date`، `dose`) — ماژول `children` |
+| `GET /routines/report?child_id` | تعداد انجام در ۷ روز اخیر |
+| `GET /child/routines` · `POST /child/routines/:id/log {slot}` | نمای کودک و تیک انجام |
+| `GET/POST /child/requests` `{category: food|clothes|school|class_fee|other, title}` | درخواست خرید کودک (فقط با وضعیت requested) |
+| `GET /purchase-requests` · `POST /purchase-requests/:id/decide {status: approved|bought|rejected, mom_note?}` | مدیریت درخواست‌ها (ماژول children) |
+| `GET/POST /child/suggestions {kind, text}` · `GET /suggestions` · `POST /suggestions/:id/status` | جعبه‌ی پیشنهاد |
+| CRUD `/occasions` | مناسبت/تولد شمسی سالانه (`jm`, `jd`, `birth_jy?`, `audience`) — ماژول events |
+| `GET /occasions/upcoming?days` | مناسبت‌های نزدیک با روزهای باقی‌مانده و سن |
+| `GET /quote/today` · CRUD `/quotes` | جمله‌ی روز بر اساس گروه سنی (`young|teen|adult`) |
+ماژول جدید دسترسی: `debts` (بدهی و اقساط) جدا از `finance`.

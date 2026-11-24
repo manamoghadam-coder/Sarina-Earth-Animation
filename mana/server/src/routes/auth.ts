@@ -5,7 +5,7 @@ import { sys, withActor } from '../db.ts';
 import { zId } from '../util.ts';
 
 export default async function authRoutes(app: FastifyInstance) {
-  app.post('/api/auth/login', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.post('/api/auth/login', { config: { rateLimit: { max: Number(process.env.LOGIN_RATE_MAX ?? 10), timeWindow: '1 minute' } } }, async (req, reply) => {
     const { username, password } = z.object({ username: z.string().min(1).max(64), password: z.string().min(1).max(200) }).strict().parse(req.body);
     if (req.headers['x-requested-with'] !== 'mana') return reply.code(403).send({ error: 'csrf' });
     const r = await login(username, password, req.headers['user-agent']);
@@ -21,7 +21,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return { ok: true };
   });
   app.get('/api/me', { preHandler: requireUser }, async (req) => withActor(req.actor!, async (q) => {
-    const [u] = await q(`SELECT id, username, display_name, role, avatar_photo_id FROM users WHERE id=$1`, [req.actor!.id]);
+    const [u] = await q(`SELECT id, username, display_name, role, avatar_photo_id, age_group FROM users WHERE id=$1`, [req.actor!.id]);
     const [s] = u.role === 'child' ? await q(`SELECT * FROM child_settings WHERE child_id=$1`, [u.id]) : [null];
     const permissions = Object.fromEntries(MODULES.map((m) => [m, level(req.actor!, m)]));
     return { ...u, settings: s, permissions };

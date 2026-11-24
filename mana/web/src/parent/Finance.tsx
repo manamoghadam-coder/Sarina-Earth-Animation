@@ -1,24 +1,25 @@
 import { useState } from 'react';
 import { api } from '../api';
 import { MONTHS, fa, fmtDate, money, parts, tehranToday } from '../jalali';
+import { useLevel } from '../auth';
 import { BarChart, DateField, Empty, Field, Loading, Modal, MoneyField, useAction, useLoad , ReadOnlyBanner } from '../ui';
 
 const CATS = ['خانه', 'حمل‌ونقل', 'سلامت', 'آموزش', 'تفریح', 'قبوض', 'پوشاک', 'اقساط و بدهی', 'حقوق', 'سایر'];
 const TYPE: Record<string, string> = { debt: 'بدهی', installment: 'قسط', loan: 'وام' };
 export default function Finance() {
-  const t = parts(tehranToday()); const [ym, setYm] = useState({ jy: t.jy, jm: t.jm }); const act = useAction();
-  const sum = useLoad(() => api(`/finance/summary?jy=${ym.jy}&jm=${ym.jm}`), [ym.jy, ym.jm]);
-  const txs = useLoad(() => api<any[]>('/transactions'), []); const debts = useLoad(() => api<any[]>('/debts'), []);
+  const lvF = useLevel('finance'); const lvD = useLevel('debts'); const t = parts(tehranToday()); const [ym, setYm] = useState({ jy: t.jy, jm: t.jm }); const act = useAction();
+  const sum = useLoad(() => (lvF >= 1 ? api(`/finance/summary?jy=${ym.jy}&jm=${ym.jm}`) : Promise.resolve(null)), [ym.jy, ym.jm, lvF]);
+  const txs = useLoad(() => (lvF >= 1 ? api<any[]>('/transactions') : Promise.resolve([])), [lvF]); const debts = useLoad(() => (lvD >= 1 ? api<any[]>('/debts') : Promise.resolve([])), [lvD]);
   const [tx, setTx] = useState<any | null>(null); const [debt, setDebt] = useState<any | null>(null); const [budget, setBudget] = useState<any | null>(null);
   const [from, to] = [sum.data?.from, sum.data?.to];
   const reloadAll = async () => { await Promise.all([sum.reload(), txs.reload(), debts.reload()]); };
   const step = (n: number) => { let m = ym.jm + n, y = ym.jy; if (m > 12) { m = 1; y++; } if (m < 1) { m = 12; y--; } setYm({ jy: y, jm: m }); };
   const d = sum.data;
   const monthTx = (txs.data ?? []).filter((x) => from && x.occurred_on >= from && x.occurred_on <= to);
-  return <div className="space-y-4"><ReadOnlyBanner module="finance" />
+  return <div className="space-y-4"><ReadOnlyBanner module="finance" /><ReadOnlyBanner module="debts" />
     <div className="flex items-center justify-between flex-wrap gap-2"><h1 className="text-xl font-extrabold">مدیریت مالی <span className="chip">خصوصی</span></h1>
-      <div className="flex gap-2"><button className="btn btn-teal" onClick={() => setTx({ kind: 'expense', amount: '', category: 'خانه', occurred_on: tehranToday(), note: '' })}>＋ تراکنش</button><button className="btn btn-ghost" onClick={() => setDebt({ title: '', type: 'installment', total_amount: '', installment_amount: '', next_due_date: tehranToday(), remaining_installments: '' })}>＋ قسط/بدهی/وام</button></div></div>
-    <div className="flex items-center justify-between"><button className="btn btn-ghost" onClick={() => step(-1)} aria-label="ماه قبل">›</button><b>{MONTHS[ym.jm - 1]} {fa(ym.jy)}</b><button className="btn btn-ghost" onClick={() => step(1)} aria-label="ماه بعد">‹</button></div>
+      <div className="flex gap-2">{lvF >= 2 && <button className="btn btn-teal" onClick={() => setTx({ kind: 'expense', amount: '', category: 'خانه', occurred_on: tehranToday(), note: '' })}>＋ تراکنش</button>}{lvD >= 2 && <button className="btn btn-ghost" onClick={() => setDebt({ title: '', type: 'installment', total_amount: '', installment_amount: '', next_due_date: tehranToday(), remaining_installments: '' })}>＋ قسط/بدهی/وام</button>}</div></div>
+    {lvF >= 1 && <div className="flex items-center justify-between"><button className="btn btn-ghost" onClick={() => step(-1)} aria-label="ماه قبل">›</button><b>{MONTHS[ym.jm - 1]} {fa(ym.jy)}</b><button className="btn btn-ghost" onClick={() => step(1)} aria-label="ماه بعد">‹</button></div>}
     <Loading error={sum.error} loading={sum.loading && !d} />
     {d && <>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
@@ -29,14 +30,14 @@ export default function Finance() {
       <section className="card"><div className="flex justify-between items-center mb-2"><h2 className="font-bold">هزینه‌ها به تفکیک دسته (تومان)</h2><button className="btn btn-ghost !py-1" onClick={() => setBudget({ category: 'خانه', amount: '' })}>تعیین بودجه</button></div>
         {d.by_category.length ? <BarChart rows={d.by_category.map((c: any) => ({ label: c.category, value: c.total, budget: c.budget }))} fmt={money} /> : <Empty>هزینه‌ای در این ماه ثبت نشده.</Empty>}
         {d.budgets.length > 0 && <p className="text-xs text-slate-500 mt-2">خط عمودی = بودجه؛ قرمز = بیش از بودجه.</p>}</section></>}
-    <section className="card"><h2 className="font-bold mb-2">💳 بدهی‌ها، اقساط و وام‌ها</h2>{!debts.data?.length && <Empty>موردی ثبت نشده.</Empty>}
+    {lvD >= 1 && <section className="card"><h2 className="font-bold mb-2">💳 بدهی‌ها، اقساط و وام‌ها</h2>{!debts.data?.length && <Empty>موردی ثبت نشده.</Empty>}
       {debts.data?.map((x) => <div key={x.id} className={`py-2 border-b border-slate-100 last:border-0 ${x.status === 'closed' ? 'opacity-50' : ''}`}><div className="flex justify-between items-center gap-2"><div><b>{x.title}</b> <span className="chip">{TYPE[x.type]}</span>
         <div className="text-sm text-slate-600">باقی‌مانده: {money(x.total_amount - x.paid_amount)} از {money(x.total_amount)}{x.installment_amount ? ` — قسط ${money(x.installment_amount)}` : ''}{x.next_due_date && x.status === 'open' ? ` — سررسید ${fmtDate(x.next_due_date)}` : ''}{x.remaining_installments != null ? ` — ${fa(x.remaining_installments)} قسط مانده` : ''}</div></div>
         <span className="flex gap-1">{x.status === 'open' && <button className="btn btn-teal !py-1" onClick={() => confirm(`پرداخت ${money(x.installment_amount ?? x.total_amount - x.paid_amount)} تومان ثبت شود؟ (به عنوان هزینه هم ثبت می‌شود)`) && act(async () => { await api(`/debts/${x.id}/pay`, { body: {} }); await reloadAll(); }, 'پرداخت ثبت شد')}>پرداخت</button>}
-          <button className="btn btn-ghost !py-1" aria-label="ویرایش" onClick={() => setDebt({ ...x })}>✎</button></span></div></div>)}</section>
-    <section className="card"><h2 className="font-bold mb-2">تراکنش‌های این ماه</h2>{monthTx.length === 0 && <Empty>تراکنشی نیست.</Empty>}
+          <button className="btn btn-ghost !py-1" aria-label="ویرایش" onClick={() => setDebt({ ...x })}>✎</button></span></div></div>)}</section>}
+    {lvF >= 1 && <section className="card"><h2 className="font-bold mb-2">تراکنش‌های این ماه</h2>{monthTx.length === 0 && <Empty>تراکنشی نیست.</Empty>}
       {monthTx.map((x) => <div key={x.id} className="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0"><button className="text-start flex-1" onClick={() => setTx({ ...x })}><span className={x.kind === 'income' ? 'text-teal-700' : 'text-red-600'}>{x.kind === 'income' ? '＋' : '－'} {money(x.amount)}</span> <span className="chip">{x.category}</span> <span className="text-xs text-slate-500">{fmtDate(x.occurred_on, false)} {x.note}</span></button>
-        <button className="btn btn-ghost !py-1" aria-label="حذف" onClick={() => confirm('حذف شود؟') && act(async () => { await api(`/transactions/${x.id}`, { method: 'DELETE' }); await reloadAll(); })}>🗑</button></div>)}</section>
+        <button className="btn btn-ghost !py-1" aria-label="حذف" onClick={() => confirm('حذف شود؟') && act(async () => { await api(`/transactions/${x.id}`, { method: 'DELETE' }); await reloadAll(); })}>🗑</button></div>)}</section>}
     {tx && <Modal title={tx.id ? 'ویرایش تراکنش' : 'تراکنش جدید'} onClose={() => setTx(null)}>
       <div className="flex gap-2 mb-3">{(['expense', 'income'] as const).map((k) => <button key={k} className={`btn flex-1 ${tx.kind === k ? '' : 'btn-ghost'}`} onClick={() => setTx({ ...tx, kind: k })}>{k === 'expense' ? 'هزینه' : 'درآمد'}</button>)}</div>
       <Field label="مبلغ (تومان)"><MoneyField value={tx.amount} onChange={(v) => setTx({ ...tx, amount: v })} /></Field>

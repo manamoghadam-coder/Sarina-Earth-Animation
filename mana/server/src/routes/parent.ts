@@ -20,7 +20,7 @@ export default async function parentRoutes(app: FastifyInstance) {
   crud(app, 'debts', 'debts', z.object({
     title: zText(), type: z.enum(['debt', 'installment', 'loan']), total_amount: z.number().int().min(0), paid_amount: z.number().int().min(0).optional(),
     installment_amount: z.number().int().positive().nullable().optional(), next_due_date: zDate.nullable().optional(), remaining_installments: z.number().int().min(0).nullable().optional(), status: z.enum(['open', 'closed']).optional(),
-  }), 'next_due_date NULLS LAST', [], 'finance');
+  }), 'next_due_date NULLS LAST', [], 'debts');
   crud(app, 'goals', 'goals', z.object({ title: zText(), horizon: z.enum(['short', 'long', 'learning']).optional(), progress: z.number().int().min(0).max(100).optional(), target_date: zDate.nullable().optional(), status: z.enum(['active', 'done', 'dropped']).optional() }), 'created_at DESC', [], 'goals');
   crud(app, 'habits', 'habits', z.object({ title: zText(), active: z.boolean().optional() }), 'title', [], 'goals');
 
@@ -48,7 +48,7 @@ export default async function parentRoutes(app: FastifyInstance) {
   });
 
   // pay one installment / a custom amount; records an expense and moves the due date by one Jalali month
-  app.post('/api/debts/:id/pay', { preHandler: requirePerm('finance', 2) }, async (req, reply) => {
+  app.post('/api/debts/:id/pay', { preHandler: requirePerm('debts', 2) }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
     const { amount } = z.object({ amount: z.number().int().positive().optional() }).parse(req.body ?? {});
     return withActor(req.actor!, async (q) => {

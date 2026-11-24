@@ -3,7 +3,7 @@ import { api } from '../api';
 import { Empty, Field, useAction, useLoad } from '../ui';
 
 const MODS: [string, string, string][] = [
-  ['tasks', '✅ کارها و پروژه‌ها', 'کارهای شخصی/کاری مانا'], ['events', '📅 تقویم و رویدادها', 'جلسات و قرارها'], ['finance', '💰 مالی', 'درآمد، هزینه، اقساط، بودجه — حساس'],
+  ['tasks', '✅ کارها و پروژه‌ها', 'کارهای شخصی/کاری مانا'], ['events', '📅 تقویم و رویدادها', 'جلسات و قرارها'], ['finance', '💰 مالی', 'درآمد، هزینه، بودجه — حساس'], ['debts', '💳 بدهی و اقساط', 'بدهی‌ها، وام‌ها و سررسید اقساط — حساس'],
   ['goals', '🎯 اهداف و عادت‌ها', 'اهداف شخصی'], ['children', '👨‍👩‍👧‍👦 برنامه و پاداش کودکان', 'برنامه، تأیید ستاره، جوایز، اعلان‌ها'], ['photos', '🖼 تصاویر کودکان', 'گالری سارینا و سامان'],
 ];
 const LV = ['بدون دسترسی', 'فقط مشاهده', 'مشاهده و ویرایش'];
@@ -20,7 +20,7 @@ export function AccessPanel() {
         <label className="text-sm flex items-center gap-2"><input type="checkbox" className="w-5 h-5" checked={u.active} onChange={(e) => save(u.id, { active: e.target.checked })} />فعال</label></div>
       {MODS.map(([k, t, d]) => <div key={k} className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0"><div><div>{t}</div><div className="text-xs text-slate-500">{d}</div></div>
         <select aria-label={t} className="input !w-44" value={u.permissions[k] ?? 0} onChange={(e) => save(u.id, { permissions: { [k]: +e.target.value } })}>{LV.map((l, i) => <option key={i} value={i}>{l}</option>)}</select></div>)}
-      <p className="text-xs text-slate-500 mt-2">MANA AI، مدیریت حساب‌ها و رمز کودکان همیشه فقط برای مانا است.</p>
+      <p className="text-xs text-slate-500 mt-2">دستیار هوشمند، مدیریت حساب‌ها و رمز کودکان همیشه فقط برای مانا است.</p>
       <Field label="رمز جدید برای این حساب (حداقل ۸ نویسه)"><div className="flex gap-2"><input className="input" dir="ltr" value={pw[u.id] ?? ''} onChange={(e) => setPw({ ...pw, [u.id]: e.target.value })} />
         <button className="btn" disabled={(pw[u.id] ?? '').length < 8} onClick={() => act(async () => { await api(`/members/${u.id}/password`, { body: { password: pw[u.id] } }); setPw({ ...pw, [u.id]: '' }); }, 'رمز تغییر کرد')}>ثبت</button></div></Field></div>)}</section>;
 }

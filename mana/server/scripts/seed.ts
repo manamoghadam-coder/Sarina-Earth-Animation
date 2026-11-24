@@ -14,7 +14,7 @@ const accounts = [
 ];
 const ids: Record<string, string> = {};
 for (const a of accounts) {
-  const [u] = await sys(`INSERT INTO users (username, display_name, role, password_hash) VALUES ($1,$2,$3,$4) RETURNING id`, [a.username, a.name, a.role, await hashPassword(a.password)]);
+  const [u] = await sys(`INSERT INTO users (username, display_name, role, password_hash, age_group) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [a.username, a.name, a.role, await hashPassword(a.password), a.role === 'child' ? (a.username === 'saman' ? 'young' : 'teen') : 'adult']);
   ids[a.username] = u.id;
   if (a.role === 'child') await sys('INSERT INTO child_settings (child_id, voice_notifications, read_aloud_default) VALUES ($1,$2,$2)', [u.id, a.username === 'saman']);
 }

@@ -6,12 +6,15 @@ import { Loading, useAction, useLoad } from '../ui';
 
 const pr = ['', '🔴 مهم', '🟡 متوسط', '🟢 کم'];
 export default function Dashboard() {
-  const { data: d, error, loading, reload } = useLoad(() => api('/dashboard'));
-  const act = useAction(); const { me } = useAuth(); const [t, e, f, g, c] = [useLevel('tasks'), useLevel('events'), useLevel('finance'), useLevel('goals'), useLevel('children')];
+  const { data: d, error, loading, reload } = useLoad(() => api('/dashboard')); const quote = useLoad(() => api<{ text: string | null }>('/quote/today')); const occ = useLoad(() => api<any[]>('/occasions/upcoming?days=30')); const reqs = useLoad(() => api<any[]>('/purchase-requests').catch(() => []));
+  const act = useAction(); const { me } = useAuth(); const [t, e, f, g, c] = [useLevel('tasks'), useLevel('events'), useLevel('finance'), useLevel('goals'), useLevel('children')]; const lvDebts = useLevel('debts');
   if (!d) return <Loading error={error} loading={loading} />;
   const hour = Number(d.time.slice(0, 2)); const greet = hour < 12 ? 'صبح بخیر' : hour < 18 ? 'عصر بخیر' : 'شب بخیر';
   return <div className="space-y-4">
     <header><p className="text-slate-500">{greet}، {me!.display_name}</p><h1 className="text-2xl font-extrabold">{d.today_fa}</h1></header>
+    {quote.data?.text && <div className="quote-card" style={{ ['--k2' as any]: '#7c3aed', ['--k3' as any]: '#ec7fb8' }}><div className="text-sm opacity-80">✨ جمله‌ی امروز</div><p className="text-lg font-bold leading-8">{quote.data.text}</p></div>}
+    {c > 0 && (reqs.data ?? []).filter((r: any) => r.status === 'requested').length > 0 && <Link to="/family" className="card block border-amber-300 bg-amber-50">🛍 {fa((reqs.data ?? []).filter((r: any) => r.status === 'requested').length)} درخواست خرید جدید از بچه‌ها منتظر پاسخ است ←</Link>}
+    {occ.data && occ.data.length > 0 && <section className="card"><h2 className="font-bold mb-1">🎉 مناسبت‌های نزدیک</h2>{occ.data.slice(0, 4).map((o) => <div key={o.id} className="flex justify-between py-0.5"><span>{o.icon} {o.title}{o.age ? ` (${fa(o.age)} سالگی)` : ''}</span><span className="text-slate-500 text-sm">{o.days_left === 0 ? 'امروز' : `${fa(o.days_left)} روز دیگر`}</span></div>)}</section>}
     {t + e + f + g + c === 0 && <p className="card">هنوز به بخشی دسترسی ندارید. مانا می‌تواند دسترسی‌ها را تعریف کند.</p>}
     {c > 0 && d.pending_completions.length > 0 && <section className="card border-amber-300 bg-amber-50"><h2 className="font-bold mb-2">⭐ در انتظار تأیید شما ({fa(d.pending_completions.length)})</h2>
       {d.pending_completions.map((c: any) => <div key={c.id} className="flex items-center justify-between py-1"><span>{c.child}: {c.title}</span>
@@ -29,7 +32,7 @@ export default function Dashboard() {
         {d.events.length === 0 ? <p className="text-slate-500">رویدادی نیست.</p> : d.events.map((e: any) => { const x = fmtInstant(e.starts_at); return <div key={e.id} className="py-1">{e.title} — <span className="text-slate-600">{fmtDate(x.date)} {fa(x.time)}</span></div>; })}</section>}
       {f > 0 && <section className="card"><h2 className="font-bold mb-2">💰 وضعیت مالی ماه</h2>
         <div className="grid grid-cols-3 text-center gap-2"><div><div className="text-xs text-slate-500">درآمد</div><b className="text-teal-700">{money(d.finance.income)}</b></div><div><div className="text-xs text-slate-500">هزینه</div><b className="text-red-600">{money(d.finance.expense)}</b></div><div><div className="text-xs text-slate-500">مانده نقدینگی</div><b>{money(d.finance.balance)}</b></div></div>
-        {d.dues.map((x: any) => <div key={x.id} className="text-amber-700 text-sm mt-2">💳 {x.title} — سررسید {fmtDate(x.next_due_date, false)}</div>)}<Link to="/finance" className="text-teal-700 text-sm">مدیریت مالی ←</Link></section>}
+        {lvDebts > 0 && d.dues.map((x: any) => <div key={x.id} className="text-amber-700 text-sm mt-2">💳 {x.title} — سررسید {fmtDate(x.next_due_date, false)}</div>)}<Link to="/finance" className="text-teal-700 text-sm">مدیریت مالی ←</Link></section>}
       {g > 0 && <section className="card"><h2 className="font-bold mb-2">🌱 عادت‌های امروز</h2>
         {d.habits.length === 0 ? <p className="text-slate-500">عادتی تعریف نشده (بخش اهداف).</p> : d.habits.map((h: any) => <label key={h.id} className="flex items-center gap-2 py-1"><input type="checkbox" className="w-5 h-5" checked={h.done} onChange={(e) => act(async () => { await api(`/habits/${h.id}/log`, { method: 'PUT', body: { day: d.today, done: e.target.checked } }); await reload(); })} />{h.title}</label>)}</section>}
       {t > 0 && <section className="card"><h2 className="font-bold mb-2">📊 گزارش هفتگی</h2>
