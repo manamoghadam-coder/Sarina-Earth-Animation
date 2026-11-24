@@ -22,7 +22,7 @@ export function AccountsPanel() {
       <Field label="نوع"><select className="input" value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}><option value="member">بزرگسال (دسترسی را بعداً تعیین می‌کنید)</option><option value="child">کودک</option></select></Field>
       {f.role === 'child' && <Field label="گروه سنی"><select className="input" value={f.age_group} onChange={(e) => setF({ ...f, age_group: e.target.value })}><option value="young">کودک خردسال (حدود ۷ سال، رابط تصویری)</option><option value="teen">نوجوان</option></select></Field>}
       <Field label="رمز عبور (حداقل ۸ نویسه)"><input className="input" dir="ltr" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field></div>
-    <button className="btn btn-teal" disabled={!/^[a-z0-9_]{3,32}$/.test(f.username) || !f.display_name.trim() || f.password.length < 8} onClick={() => act(async () => { await api('/users', { body: { ...f, age_group: f.role === 'child' ? f.age_group : undefined } }); setF({ ...f, username: '', display_name: '', password: '' }); await users.reload(); }, 'حساب ساخته شد')}>＋ ساخت حساب</button></section>;
+    <button className="btn btn-teal" disabled={!/^[a-z0-9_]{3,32}$/.test(f.username) || !f.display_name.trim() || f.password.length < 4} onClick={() => act(async () => { await api('/users', { body: { ...f, age_group: f.role === 'child' ? f.age_group : undefined } }); setF({ ...f, username: '', display_name: '', password: '' }); await users.reload(); }, 'حساب ساخته شد')}>＋ ساخت حساب</button></section>;
 }
 
 export function TwoFactorPanel() {

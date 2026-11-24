@@ -361,11 +361,103 @@ test('account management and TOTP two-factor (Mana only)', async () => {
   assert.equal((await login()).statusCode, 200);
   await sys(`DELETE FROM users WHERE username='t_kid3'`);
 });
-test('backups: Mana can run/list/download; others cannot; archive contains the database dump', async () => {
+test('backups: no duplicates when nothing changed; only changed parts are backed up; permissions', async () => {
   assert.equal((await call('t_sa', 'POST', '/api/backups/run', {})).statusCode, 403);
   assert.equal((await call('t_dad', 'GET', '/api/backups')).statusCode, 403);
-  const r = await call('t_mom', 'POST', '/api/backups/run', {}); assert.equal(r.statusCode, 200, r.body);
-  const { db } = JSON.parse(r.body); const list = JSON.parse((await call('t_mom', 'GET', '/api/backups')).body); assert.ok(list.some((b: any) => b.name === db && b.bytes > 1000));
-  const dl = await call('t_mom', 'GET', `/api/backups/${db}`); assert.equal(dl.statusCode, 200); assert.equal(dl.rawPayload.subarray(0, 5).toString(), 'PGDMP');
-  assert.equal((await call('t_mom', 'GET', '/api/backups/..%2F..%2Fetc%2Fpasswd')).statusCode, 400);                                  // no path traversal
+  await new Promise((r) => setTimeout(r, 1600));                                                    // let pg statistics settle
+  const r1 = JSON.parse((await call('t_mom', 'POST', '/api/backups/run?force=1', {})).body); assert.ok(r1.db && r1.files);
+  const r2 = JSON.parse((await call('t_mom', 'POST', '/api/backups/run', {})).body); assert.deepEqual(r2.skipped.sort(), ['db', 'files']); assert.equal(r2.db, null);   // identical data => no new backup
+  await sys(`INSERT INTO settings (key,value) VALUES ('zz_probe','1') ON CONFLICT DO NOTHING`); await sys(`DELETE FROM settings WHERE key='zz_probe'`);
+  await new Promise((r) => setTimeout(r, 1600));
+  const r3 = JSON.parse((await call('t_mom', 'POST', '/api/backups/run', {})).body); assert.ok(r3.db); assert.deepEqual(r3.skipped, ['files']);                          // data changed, files did not
+  const st = JSON.parse((await call('t_mom', 'GET', '/api/backups')).body); assert.ok(st.items.some((b: any) => b.name === r1.db && b.bytes > 1000)); assert.equal(st.intervalHours, 24);
+  assert.equal((await call('t_mom', 'PUT', '/api/backups/settings', { interval_hours: 12, keep: 5 })).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_mom', 'GET', '/api/backups')).body).intervalHours, 12);
+  await sys(`DELETE FROM settings WHERE key IN ('backup_interval_hours','backup_keep')`);
+  const dl = await call('t_mom', 'GET', `/api/backups/${r1.db}`); assert.equal(dl.statusCode, 200); assert.equal(dl.rawPayload.subarray(0, 5).toString(), 'PGDMP');
+  assert.equal((await call('t_mom', 'GET', '/api/backups/..%2F..%2Fetc%2Fpasswd')).statusCode, 400);
+});
+test('progressive lockout doubles the lock time (protects short PINs)', async () => {
+  await mk('t_pin', 'child'); await sys(`UPDATE users SET password_hash=$1 WHERE username='t_pin'`, [await hashPassword('1399')]);
+  const [{ id }] = await sys(`SELECT id FROM users WHERE username='t_pin'`);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/auth/login', headers: H, payload: { username: 't_pin', password: '1399' } })).statusCode, 200);   // short PIN works when correct
+  await sys(`UPDATE users SET failed_logins=9, locked_until=NULL WHERE id=$1`, [id]);
+  await app.inject({ method: 'POST', url: '/api/auth/login', headers: H, payload: { username: 't_pin', password: 'wrong' } });
+  const [u] = await sys(`SELECT extract(epoch FROM (locked_until - now()))/60 AS mins FROM users WHERE id=$1`, [id]); assert.ok(u.mins > 18 && u.mins <= 20.1, String(u.mins));   // 10th failure => 20 min
+  assert.equal((await app.inject({ method: 'POST', url: '/api/auth/login', headers: H, payload: { username: 't_pin', password: '1399' } })).statusCode, 429);          // even the right PIN is refused while locked
+});
+test('messenger: Bale by default, Telegram switchable; link by one-time code; notifications delivered; commands respect permissions', async () => {
+  const http = await import('node:http'); const sent: { path: string; body: any }[] = [];
+  const mock = http.createServer((req, res) => { let d = ''; req.on('data', (c) => (d += c)); req.on('end', () => { sent.push({ path: req.url!, body: JSON.parse(d || '{}') }); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ ok: true, result: {} })); }); });
+  await new Promise<void>((r) => mock.listen(0, '127.0.0.1', r)); const base = `http://127.0.0.1:${(mock.address() as any).port}`;
+  const { config } = await import('../src/config.ts'); const { handleMessage } = await import('../src/messenger.ts'); const { deliver } = await import('../src/scheduler.ts');
+  const saved = { p: config.messengerProviders, bt: config.baleToken, bb: config.baleBase, tt: config.telegramToken, tb: config.telegramBase };
+  Object.assign(config, { messengerProviders: ['bale'], baleToken: 'BT', baleBase: base, telegramToken: '', telegramBase: base });
+  const st = JSON.parse((await call('t_mom', 'GET', '/api/messenger/status')).body); assert.equal(st.providers.find((p: any) => p.provider === 'bale').active, true); assert.equal(st.providers.find((p: any) => p.provider === 'telegram').active, false);
+  assert.equal((await call('t_mom', 'POST', '/api/messenger/link-code', { provider: 'telegram' })).statusCode, 409);               // Telegram not enabled yet
+  assert.equal((await call('t_sa', 'POST', '/api/messenger/link-code', { provider: 'bale' })).statusCode, 403);                  // children never get a bot link
+  assert.match((await handleMessage('bale', 'chatX', '/today'))!, /به هیچ حسابی متصل نیست/);                                       // unlinked chat gets nothing private
+  assert.match((await handleMessage('bale', 'chatX', '/start BADCODE1'))!, /معتبر نیست/);
+  const { code } = JSON.parse((await call('t_mom', 'POST', '/api/messenger/link-code', { provider: 'bale' })).body);
+  assert.match((await handleMessage('bale', 'chat-mom', `/start ${code}`))!, /اتصال انجام شد/);
+  assert.match((await handleMessage('bale', 'chat-other', `/start ${code}`))!, /معتبر نیست/);                                       // code is one-time
+  assert.match((await handleMessage('bale', 'chat-mom', '/today'))!, /📅/);
+  await handleMessage('bale', 'chat-mom', '/add شیر'); assert.match((await handleMessage('bale', 'chat-mom', '/list'))!, /شیر/);
+  // delivery through the messenger channel
+  await sys(`INSERT INTO notifications (user_id,kind,title,body,icon,due_at,dedupe_key) VALUES ($1,'test','عنوان-تست','متن-تست','🔔', now() - interval '1 minute','msgtest:'||gen_random_uuid())`, [ids.t_mom]);
+  await deliver(); const m = sent.find((x) => x.path.endsWith('/sendMessage') && /عنوان-تست/.test(x.body.text)); assert.ok(m); assert.equal(m!.body.chat_id, 'chat-mom'); assert.ok(m!.path.startsWith('/botBT/'));
+  assert.equal((await sys(`SELECT msg_status FROM notifications WHERE title='عنوان-تست'`))[0].msg_status, 'bale:ok');
+  // switch to Telegram only: Bale link stays stored but is not used; Telegram can be linked
+  Object.assign(config, { messengerProviders: ['telegram'], telegramToken: 'TT' });
+  const c2 = JSON.parse((await call('t_mom', 'POST', '/api/messenger/link-code', { provider: 'telegram' })).body); assert.match((await handleMessage('telegram', 'tg-1', `/start ${c2.code}`))!, /تلگرام/);
+  sent.length = 0; await sys(`INSERT INTO notifications (user_id,kind,title,body,icon,due_at,dedupe_key) VALUES ($1,'test','عنوان-۲','x','🔔', now() - interval '1 minute','msgtest:'||gen_random_uuid())`, [ids.t_mom]); await deliver();
+  assert.ok(sent.every((x) => x.path.startsWith('/botTT/')) && sent.some((x) => x.body.chat_id === 'tg-1'));
+  // a member without the shopping permission cannot use the shopping commands
+  await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]); await signIn('t_dad');
+  const dc = JSON.parse((await call('t_dad', 'POST', '/api/messenger/link-code', { provider: 'telegram' })).body); await handleMessage('telegram', 'tg-dad', `/start ${dc.code}`);
+  assert.match((await handleMessage('telegram', 'tg-dad', '/list'))!, /دسترسی ندارید/); assert.match((await handleMessage('telegram', 'tg-dad', '/add چیزی'))!, /اجازه/);
+  assert.match((await handleMessage('telegram', 'tg-dad', '/unlink'))!, /قطع شد/);
+  await sys(`DELETE FROM shopping_items WHERE title='شیر'`); await sys(`DELETE FROM notifications WHERE kind='test'`);
+  Object.assign(config, { messengerProviders: saved.p, baleToken: saved.bt, baleBase: saved.bb, telegramToken: saved.tt, telegramBase: saved.tb }); mock.close();
+});
+test('shopping list, health reminders and task attachments obey permissions', async () => {
+  await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]); await signIn('t_dad'); await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { shopping: 0, health: 0, tasks: 0 } });
+  for (const u of ['/api/shopping', '/api/health-records']) assert.equal((await call('t_dad', 'GET', u)).statusCode, 403);
+  // shopping
+  const it = JSON.parse((await call('t_mom', 'POST', '/api/shopping', { title: 'نان-تست', qty: '۲ عدد', category: 'food' })).body);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { shopping: 1 } });
+  assert.equal(JSON.parse((await call('t_dad', 'GET', '/api/shopping')).body).some((x: any) => x.title === 'نان-تست'), true);
+  assert.equal((await call('t_dad', 'POST', '/api/shopping', { title: 'x' })).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { shopping: 2 } });
+  assert.equal(JSON.parse((await call('t_dad', 'POST', `/api/shopping/${it.id}/status`, { status: 'bought' })).body).status, 'bought');
+  assert.equal(JSON.parse((await call('t_mom', 'POST', '/api/shopping/clear-bought', {})).body).removed >= 1, true);
+  const rq = JSON.parse((await call('t_sa', 'POST', '/api/child/requests', { category: 'school', title: 'مداد-تست' })).body);
+  assert.equal((await call('t_mom', 'POST', `/api/purchase-requests/${rq.id}/to-shopping`, {})).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_mom', 'GET', '/api/shopping')).body).some((x: any) => x.title === 'مداد-تست' && x.category === 'school'), true);
+  await sys(`DELETE FROM shopping_items WHERE title='مداد-تست'`);
+  // health + reminder timing
+  const tomorrow = (await import('../src/jalali.ts')).addDays(todayISO(), 1);
+  const h = JSON.parse((await call('t_mom', 'POST', '/api/health-records', { title: 'واکسن-تست', kind: 'vaccine', person_id: ids.t_sa, person_label: 'سارینا', due_date: tomorrow })).body);
+  await generate(tehranInstant(todayISO(), '18:05')); await generate(tehranInstant(todayISO(), '18:10'));
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE dedupe_key=$1`, [`health:${h.id}:eve`]))[0].n, 1);       // once, the evening before
+  const h2 = JSON.parse((await call('t_mom', 'POST', '/api/health-records', { title: 'دندان‌پزشک-تست', kind: 'dental', due_date: todayISO() })).body);
+  await generate(tehranInstant(todayISO(), '08:05')); await generate(tehranInstant(todayISO(), '08:07'));
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE dedupe_key=$1`, [`health:${h2.id}:day`]))[0].n, 1);          // once, on the day
+  await sys(`DELETE FROM health_records WHERE id=$1`, [h2.id]);
+  assert.equal((await call('t_dad', 'GET', '/api/health-records')).statusCode, 403);
+  assert.equal(JSON.parse((await call('t_mom', 'POST', `/api/health-records/${h.id}/done`, { done: true })).body).done, true);
+  await sys(`DELETE FROM health_records WHERE id=$1`, [h.id]);
+  // task attachments
+  const t = JSON.parse((await call('t_mom', 'POST', '/api/tasks', { title: 'کار-پیوست' })).body);
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(500, 65)]); const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(500, 1)]);
+  const up = async (u: string, name: string, buf: Buffer) => { const m = multipart({}, name, buf); return app.inject({ method: 'POST', url: `/api/tasks/${t.id}/files`, headers: { ...H, cookie: jar[u], 'content-type': m['content-type'] }, payload: m.payload }); };
+  const a = await up('t_mom', 'قرارداد.pdf', pdf); assert.equal(a.statusCode, 201, a.body); const b = await up('t_mom', 'گزارش.docx', zip); assert.equal(b.statusCode, 201); assert.match(JSON.parse(b.body).mime, /wordprocessingml/);
+  assert.equal((await up('t_mom', 'x.zip', zip)).statusCode, 415); assert.equal((await up('t_mom', 'x.pdf', Buffer.from('MZ not pdf'))).statusCode, 415);
+  assert.equal((await up('t_sa', 'x.pdf', pdf)).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { tasks: 1 } });
+  const list = JSON.parse((await call('t_dad', 'GET', `/api/tasks/${t.id}/files`)).body); assert.equal(list.length, 2);
+  assert.equal((await call('t_dad', 'GET', `/api/task-files/${JSON.parse(a.body).id}/file`)).statusCode, 200);
+  assert.equal((await call('t_dad', 'DELETE', `/api/task-files/${JSON.parse(a.body).id}`)).statusCode, 403);
+  const dl = await call('t_mom', 'GET', `/api/task-files/${JSON.parse(b.body).id}/file`); assert.match(String(dl.headers['content-disposition']), /attachment/);
+  assert.equal((await call('t_mom', 'DELETE', `/api/tasks/${t.id}`)).statusCode, 200); assert.equal((await sys(`SELECT count(*)::int n FROM task_files WHERE task_id=$1`, [t.id]))[0].n, 0);
 });

@@ -6,8 +6,10 @@ import { hashPassword } from '../src/auth.ts';
 const [{ n }] = await sys<{ n: number }>('SELECT count(*)::int n FROM users');
 if (n > 0 && process.argv[2] !== '--force') { console.log('users already exist; use --force to add sample data anyway'); process.exit(0); }
 const pw = () => crypto.randomBytes(9).toString('base64url');
+// Passwords come from the environment (deploy/accounts.env, never committed); otherwise random ones are generated and printed once.
 const accounts = [
   { username: 'mana', name: 'مانا', role: 'parent', password: process.env.SEED_MANA_PASSWORD ?? pw() },
+  { username: 'admin', name: 'مدیر سیستم', role: 'parent', password: process.env.SEED_ADMIN_PASSWORD ?? pw() },
   { username: 'vahid', name: 'وحید', role: 'member', password: process.env.SEED_VAHID_PASSWORD ?? pw() },
   { username: 'sarina', name: 'سارینا', role: 'child', password: process.env.SEED_SARINA_PASSWORD ?? pw() },
   { username: 'saman', name: 'سامان', role: 'child', password: process.env.SEED_SAMAN_PASSWORD ?? pw() },

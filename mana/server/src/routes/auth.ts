@@ -64,7 +64,7 @@ export default async function authRoutes(app: FastifyInstance) {
   });
   app.post('/api/members/:id/password', { preHandler: requireParent }, async (req, reply) => {
     const id = zId.parse((req.params as any).id);
-    const { password } = z.object({ password: z.string().min(8).max(100) }).strict().parse(req.body);
+    const { password } = z.object({ password: z.string().min(4).max(100) }).strict().parse(req.body);
     const hash = await hashPassword(password);
     const rows = await withActor(req.actor!, (q) => q(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1 AND role='member' RETURNING id`, [id, hash]));
     if (!rows[0]) return reply.code(404).send({ error: 'not_found' });

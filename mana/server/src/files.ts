@@ -6,7 +6,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.ts';
 
 export const storeDir = (sub: string) => { const d = path.resolve(config.storageDir, sub); fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; };
-export type Kind = { kind: 'pdf' | 'audio' | 'photo' | 'video'; mime: string; ext: string };
+export type Kind = { kind: 'pdf' | 'audio' | 'photo' | 'video' | 'office'; mime: string; ext: string };
 
 /** Identify a file by its first bytes (never trust the client's content-type or file name). */
 export function sniffFile(h: Buffer): Kind | null {
@@ -14,6 +14,7 @@ export function sniffFile(h: Buffer): Kind | null {
   if (h[0] === 0xff && h[1] === 0xd8 && h[2] === 0xff) return { kind: 'photo', mime: 'image/jpeg', ext: 'jpg' };
   if (h.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return { kind: 'photo', mime: 'image/png', ext: 'png' };
   if (h.subarray(0, 4).toString() === 'RIFF' && h.subarray(8, 12).toString() === 'WEBP') return { kind: 'photo', mime: 'image/webp', ext: 'webp' };
+  if (h[0] === 0x50 && h[1] === 0x4b && h[2] === 0x03 && h[3] === 0x04) return { kind: 'office', mime: 'application/zip', ext: 'zip' };
   if (h.subarray(0, 4).toString() === 'RIFF' && h.subarray(8, 12).toString() === 'WAVE') return { kind: 'audio', mime: 'audio/wav', ext: 'wav' };
   if (h.subarray(0, 4).toString() === 'OggS') return { kind: 'audio', mime: 'audio/ogg', ext: 'ogg' };
   if (h.subarray(0, 3).toString() === 'ID3' || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0)) return { kind: 'audio', mime: 'audio/mpeg', ext: 'mp3' };

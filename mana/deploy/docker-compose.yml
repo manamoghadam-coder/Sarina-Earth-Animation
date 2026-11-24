@@ -9,6 +9,9 @@ services:
   mana:
     build: { context: .., dockerfile: deploy/Dockerfile }
     depends_on: { db: { condition: service_healthy } }
+    env_file:
+      - path: accounts.env      # رمزهای اولیه‌ی حساب‌ها (اختیاری؛ در git نیست)
+        required: false
     expose: [ "8080" ]
     restart: unless-stopped
     volumes: [ "photos:/app/server/storage" ]

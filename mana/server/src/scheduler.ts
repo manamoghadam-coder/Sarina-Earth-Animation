@@ -1,7 +1,8 @@
 import { sys } from './db.ts';
 import { addDays, persianWeekday, tehranInstant, tehranParts, toFaDigits, todayISO } from './jalali.ts';
 import { sendPush } from './push.ts';
-import { runBackup, todaysBackupExists } from './backup.ts';
+import { backupDue, runBackup } from './backup.ts';
+import { sendToUser } from './messenger.ts';
 import { fmtMoney } from './util.ts';
 
 const GRACE_MIN = 10;      // a reminder is still delivered if the server was briefly down
@@ -66,8 +67,14 @@ export async function generate(now = new Date()) {
   const debts = await sys(`SELECT * FROM debts WHERE status='open' AND next_due_date IN ($1,$2)`, [today, addDays(today, 3)]);
   for (const d of debts) { const due = tehranInstant(today, '09:00'); if (now >= due && now.getTime() - due.getTime() <= 4 * 3600000) await enqueue({ user_id: mom.id, kind: 'debt', title: d.title, body: `${d.next_due_date === today ? 'امروز' : 'سه روز دیگر'} سررسید: ${d.title}${d.installment_amount ? ' — ' + fmtMoney(d.installment_amount) + ' تومان' : ''}`, icon: '💳', due, key: `debt:${d.id}:${d.next_due_date}:${d.next_due_date === today ? 0 : 3}`, ref_type: 'debt', ref_id: d.id }); }
   const at = (h: string) => tehranInstant(today, h);
+  // health reminders: the evening before (18:00) and on the day (08:00; or 2 h before a set time)
+  for (const h of await sys(`SELECT * FROM health_records WHERE NOT done AND due_date IN ($1,$2)`, [today, addDays(today, 1)])) {
+    const eve = h.due_date !== today; const when = eve ? at('18:00') : (h.due_time ? new Date(Math.max(at('08:00').getTime(), tehranInstant(today, h.due_time).getTime() - 2 * 3600000)) : at('08:00'));
+    if (now < when || now.getTime() - when.getTime() > 4 * 3600000) continue;
+    const who = h.person_label ?? ''; await enqueue({ user_id: mom.id, kind: 'health', title: h.title, icon: '🩺', due: when, key: `health:${h.id}:${eve ? 'eve' : 'day'}`, body: `${eve ? 'فردا' : 'امروز'}${h.due_time ? ' ساعت ' + toFaDigits(h.due_time) : ''}: ${h.title}${who ? ' (' + who + ')' : ''}${h.doctor ? ' — ' + h.doctor : ''}` });
+  }
   // nightly backup at 03:00 (once per day)
-  if (nowP.hour >= 3 && process.env.BACKUP_AUTO !== 'off' && !todaysBackupExists(today.replace(/-/g, ''))) {
+  if (process.env.BACKUP_AUTO !== 'off' && (await backupDue(nowP.hour, now))) {
     try { await runBackup(); } catch (e: any) { await enqueue({ user_id: mom.id, kind: 'backup', title: 'پشتیبان‌گیری ناموفق بود', body: `پشتیبان‌گیری خودکار انجام نشد: ${String(e.message).slice(0, 120)}`, icon: '⚠️', due: now, key: `backupfail:${today}` }); }
   }
   // Friday 18:00 weekly report for Mana
@@ -96,7 +103,8 @@ export async function deliver() {
   const rows = await sys(`SELECT id,user_id,title,body,icon FROM notifications WHERE due_at <= now() AND sent_at IS NULL ORDER BY due_at LIMIT 50`);
   for (const n of rows) {
     const status = await sendPush(n.user_id, { id: n.id, title: n.title, body: n.body, icon: n.icon, url: '/' });
-    await sys(`UPDATE notifications SET sent_at=now(), push_status=$2 WHERE id=$1`, [n.id, status]);
+    const msg = await sendToUser(n.user_id, `${n.icon} ${n.title}\n${n.body}`).catch(() => 'error');
+    await sys(`UPDATE notifications SET sent_at=now(), push_status=$2, msg_status=$3 WHERE id=$1`, [n.id, status, msg]);
   }
 }
 export function startScheduler(log: { info: Function; error: Function }) {

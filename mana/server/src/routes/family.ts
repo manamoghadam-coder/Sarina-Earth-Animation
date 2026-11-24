@@ -30,9 +30,9 @@ export default async function familyRoutes(app: FastifyInstance) {
   });
   app.post('/api/children/:id/password', { preHandler: requireParent }, async (req) => {
     const id = zId.parse((req.params as any).id);
-    const { password } = z.object({ password: z.string().min(8).max(100) }).parse(req.body);
+    const { password } = z.object({ password: z.string().min(4).max(100) }).parse(req.body);   // children: Mana may choose a short PIN; lockout is progressive
     const hash = await hashPassword(password);
-    await withActor(req.actor!, (q) => q(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1`, [id, hash]));
+    await withActor(req.actor!, (q) => q(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL WHERE id=$1 AND role='child'`, [id, hash]));
     await revokeAll(id);
     return { ok: true };
   });

@@ -10,6 +10,9 @@ export const config = {
   anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
   anthropicBase: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
   anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5-5',
+  messengerProviders: (process.env.MESSENGER_PROVIDERS ?? 'bale').split(',').map((s) => s.trim()).filter(Boolean),   // bale | telegram | bale,telegram | (empty = off)
+  baleToken: process.env.BALE_BOT_TOKEN ?? '', baleBase: process.env.BALE_API_BASE ?? 'https://tapi.bale.ai',
+  telegramToken: process.env.TELEGRAM_BOT_TOKEN ?? '', telegramBase: process.env.TELEGRAM_API_BASE ?? 'https://api.telegram.org',
   scheduler: (process.env.SCHEDULER ?? 'on') === 'on',
   tz: 'Asia/Tehran',
   sessionDays: 14,

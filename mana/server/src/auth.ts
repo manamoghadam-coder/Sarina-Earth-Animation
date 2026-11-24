@@ -19,6 +19,11 @@ export async function verifyPassword(pw: string, stored: string) {
 const sha = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 export const COOKIE = 'mana_session';
 
+/** Progressive lockout: every 5th consecutive failure locks the account for 10 min x 2^(n-1) (max 24 h). Protects short PINs on children's accounts. */
+async function failLogin(id: string) {
+  await sys(`UPDATE users SET failed_logins = failed_logins + 1,
+    locked_until = CASE WHEN (failed_logins + 1) % 5 = 0 THEN now() + LEAST(interval '24 hours', interval '10 minutes' * power(2, ((failed_logins + 1) / 5) - 1)) ELSE locked_until END WHERE id = $1`, [id]);
+}
 export async function login(username: string, password: string, ua?: string, totp?: string) {
   const [u] = await sys(`SELECT id, role, display_name, password_hash, active, locked_until, failed_logins, totp_enabled, totp_secret FROM users WHERE username = $1`, [username.toLowerCase()]);
   // Always run a hash to keep timing similar for unknown users
@@ -26,13 +31,13 @@ export async function login(username: string, password: string, ua?: string, tot
   if (!u || !u.active) return null;
   if (u.locked_until && new Date(u.locked_until) > new Date()) return { locked: true as const };
   if (!ok) {
-    await sys(`UPDATE users SET failed_logins = failed_logins + 1, locked_until = CASE WHEN failed_logins + 1 >= 5 THEN now() + interval '10 minutes' ELSE locked_until END WHERE id = $1`, [u.id]);
+    await failLogin(u.id);
     return null;
   }
   if (u.totp_enabled) {
     if (!totp) return { totp_required: true as const };
     if (!u.totp_secret || !verifyTotp(u.totp_secret, totp)) {
-      await sys(`UPDATE users SET failed_logins = failed_logins + 1, locked_until = CASE WHEN failed_logins + 1 >= 5 THEN now() + interval '10 minutes' ELSE locked_until END WHERE id = $1`, [u.id]);
+      await failLogin(u.id);
       return null;
     }
   }
@@ -66,7 +71,7 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
   if (req.actor!.role !== 'parent') return reply.code(403).send({ error: 'forbidden' });
 }
 
-export const MODULES = ['tasks', 'events', 'finance', 'debts', 'goals', 'children', 'photos', 'library', 'recipes'] as const;
+export const MODULES = ['tasks', 'events', 'finance', 'debts', 'goals', 'children', 'photos', 'library', 'recipes', 'shopping', 'health'] as const;
 export const level = (a: Actor, m: string) => (a.role === 'parent' ? 2 : a.role === 'member' ? Math.min(2, Math.max(0, Number(a.perms?.[m] ?? 0))) : 0);
 /** API-level gate (the database enforces the same rule through RLS). need: 1=read, 2=write. */
 export const requirePerm = (m: (typeof MODULES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {

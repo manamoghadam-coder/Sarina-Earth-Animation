@@ -21,6 +21,6 @@ export function AccessPanel() {
       {MODS.map(([k, t, d]) => <div key={k} className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0"><div><div>{t}</div><div className="text-xs text-slate-500">{d}</div></div>
         <select aria-label={t} className="input !w-44" value={u.permissions[k] ?? 0} onChange={(e) => save(u.id, { permissions: { [k]: +e.target.value } })}>{LV.map((l, i) => <option key={i} value={i}>{l}</option>)}</select></div>)}
       <p className="text-xs text-slate-500 mt-2">دستیار هوشمند، مدیریت حساب‌ها و رمز کودکان همیشه فقط برای مانا است.</p>
-      <Field label="رمز جدید برای این حساب (حداقل ۸ نویسه)"><div className="flex gap-2"><input className="input" dir="ltr" value={pw[u.id] ?? ''} onChange={(e) => setPw({ ...pw, [u.id]: e.target.value })} />
-        <button className="btn" disabled={(pw[u.id] ?? '').length < 8} onClick={() => act(async () => { await api(`/members/${u.id}/password`, { body: { password: pw[u.id] } }); setPw({ ...pw, [u.id]: '' }); }, 'رمز تغییر کرد')}>ثبت</button></div></Field></div>)}</section>;
+      <Field label="رمز جدید برای این حساب (حداقل ۴ نویسه؛ ترجیحاً قوی‌تر)"><div className="flex gap-2"><input className="input" dir="ltr" value={pw[u.id] ?? ''} onChange={(e) => setPw({ ...pw, [u.id]: e.target.value })} />
+        <button className="btn" disabled={(pw[u.id] ?? '').length < 4} onClick={() => act(async () => { await api(`/members/${u.id}/password`, { body: { password: pw[u.id] } }); setPw({ ...pw, [u.id]: '' }); }, 'رمز تغییر کرد')}>ثبت</button></div></Field></div>)}</section>;
 }
