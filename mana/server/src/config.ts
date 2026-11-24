@@ -8,6 +8,7 @@ export const config = {
   vapidPrivate: process.env.VAPID_PRIVATE_KEY ?? '',
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',
   anthropicKey: process.env.ANTHROPIC_API_KEY ?? '',
+  anthropicBase: process.env.ANTHROPIC_BASE_URL ?? 'https://api.anthropic.com',
   anthropicModel: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5-5',
   scheduler: (process.env.SCHEDULER ?? 'on') === 'on',
   tz: 'Asia/Tehran',

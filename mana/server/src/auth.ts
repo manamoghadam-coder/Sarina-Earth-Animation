@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { config } from './config.ts';
 import { sys, type Actor } from './db.ts';
+import { verify as verifyTotp } from './totp.ts';
 
 const scrypt = (pw: string, salt: Buffer) => new Promise<Buffer>((res, rej) => crypto.scrypt(pw, salt, 64, { N: 16384, r: 8, p: 1 }, (e, k) => (e ? rej(e) : res(k))));
 export async function hashPassword(pw: string) {
@@ -18,8 +19,8 @@ export async function verifyPassword(pw: string, stored: string) {
 const sha = (t: string) => crypto.createHash('sha256').update(t).digest('hex');
 export const COOKIE = 'mana_session';
 
-export async function login(username: string, password: string, ua?: string) {
-  const [u] = await sys(`SELECT id, role, display_name, password_hash, active, locked_until, failed_logins FROM users WHERE username = $1`, [username.toLowerCase()]);
+export async function login(username: string, password: string, ua?: string, totp?: string) {
+  const [u] = await sys(`SELECT id, role, display_name, password_hash, active, locked_until, failed_logins, totp_enabled, totp_secret FROM users WHERE username = $1`, [username.toLowerCase()]);
   // Always run a hash to keep timing similar for unknown users
   const ok = u ? await verifyPassword(password, u.password_hash) : (await verifyPassword(password, 'scrypt$00$00'), false);
   if (!u || !u.active) return null;
@@ -27,6 +28,13 @@ export async function login(username: string, password: string, ua?: string) {
   if (!ok) {
     await sys(`UPDATE users SET failed_logins = failed_logins + 1, locked_until = CASE WHEN failed_logins + 1 >= 5 THEN now() + interval '10 minutes' ELSE locked_until END WHERE id = $1`, [u.id]);
     return null;
+  }
+  if (u.totp_enabled) {
+    if (!totp) return { totp_required: true as const };
+    if (!u.totp_secret || !verifyTotp(u.totp_secret, totp)) {
+      await sys(`UPDATE users SET failed_logins = failed_logins + 1, locked_until = CASE WHEN failed_logins + 1 >= 5 THEN now() + interval '10 minutes' ELSE locked_until END WHERE id = $1`, [u.id]);
+      return null;
+    }
   }
   await sys(`UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = $1`, [u.id]);
   const token = crypto.randomBytes(32).toString('base64url');

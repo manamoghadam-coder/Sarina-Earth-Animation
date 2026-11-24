@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, errText } from '../api';
 import { fa, fmtDate, money } from '../jalali';
-import { Empty, Loading, Modal, useLoad, useToast } from '../ui';
+import { Empty, Loading, Mixed, Modal, useLoad, useToast } from '../ui';
 import { speak } from '../voice';
 import { useReadable } from './ReadAloud';
 
@@ -13,9 +13,9 @@ export function FactsPage() {
   useReadable(t ? [`دانستنی امروز. ${t.title}. ${t.body}`, ...(data.recent ?? []).map((f: any) => `${f.title}. ${f.body}`)] : null);
   return <><h1 className="text-3xl font-extrabold">دانستنی‌ها 🧠</h1><Loading error={error} loading={loading} />
     {data && !t && <Empty>فعلاً دانستنی‌ای نیست.</Empty>}
-    {t && <div className="quote-card"><div className="text-sm opacity-80">{TOPIC[t.topic] ?? t.topic} · دانستنی امروز</div><h2 className="text-2xl font-extrabold mt-1" dir="auto">{t.title}</h2><p className="text-xl leading-9 mt-2" dir="auto">{t.body}</p>
+    {t && <div className="quote-card"><div className="text-sm opacity-80">{TOPIC[t.topic] ?? t.topic} · دانستنی امروز</div><h2 className="text-2xl font-extrabold mt-1"><Mixed text={t.title} /></h2><p className="text-xl leading-9 mt-2"><Mixed text={t.body} /></p>
       <button className="btn !bg-white/90 !text-[var(--kd)] mt-3 !text-lg !rounded-2xl" onClick={() => speak(`${t.title}. ${t.body}`)}>🔊 بخوان برایم</button></div>}
-    {data?.recent?.length > 0 && <><h2 className="text-xl font-bold mt-2">دانستنی‌های روزهای قبل</h2>{data.recent.map((f: any) => <div key={f.id} className="kid-card"><div className="flex items-start gap-2"><div className="flex-1"><div className="text-xs opacity-60">{TOPIC[f.topic] ?? f.topic} · {fmtDate(f.day, false)}</div><b className="text-lg" dir="auto">{f.title}</b><p className="mt-1 leading-8" dir="auto">{f.body}</p></div>
+    {data?.recent?.length > 0 && <><h2 className="text-xl font-bold mt-2">دانستنی‌های روزهای قبل</h2>{data.recent.map((f: any) => <div key={f.id} className="kid-card"><div className="flex items-start gap-2"><div className="flex-1"><div className="text-xs opacity-60">{TOPIC[f.topic] ?? f.topic} · {fmtDate(f.day, false)}</div><b className="text-lg"><Mixed text={f.title} /></b><p className="mt-1 leading-8"><Mixed text={f.body} /></p></div>
       <button aria-label="بشنو" className="btn btn-ghost" onClick={() => speak(`${f.title}. ${f.body}`)}>🔊</button></div></div>)}</>}</>;
 }
 

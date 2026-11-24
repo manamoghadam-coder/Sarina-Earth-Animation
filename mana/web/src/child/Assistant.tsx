@@ -20,7 +20,7 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
   const current = () => { const n = nowMin(); const p = pending(); return p.filter((i) => mins(i.start_time) !== null && mins(i.start_time)! <= n + 20).at(-1) ?? p.find((i) => mins(i.start_time) === null) ?? p[0]; };
   const upcoming = () => { const n = nowMin(); return pending().filter((i) => mins(i.start_time) !== null && mins(i.start_time)! > n)[0]; };
 
-  const run = async (cmd: VoiceCmd) => {
+  const run = async (cmd: VoiceCmd, lastText = '') => {
     switch (cmd) {
       case 'greet': return say(`سلام ${name} جان! من دستیار تو هستم. می‌توانی بپرسی: برنامه امروز من چیه؟`);
       case 'help': return say('من می‌توانم برنامه امروزت را بگویم، بگویم الان چه کاری داری، قصه بخوانم، ستاره‌هایت را بشمارم و کارهایی که انجام دادی را به مامان خبر بدهم.');
@@ -36,12 +36,17 @@ export function AssistantSheet({ onClose }: { onClose: () => void }) {
       }
       case 'yes': if (confirm) { const f = confirm.yes; setConfirm(null); return f(); } return say('باشه!');
       case 'no': if (confirm) { setConfirm(null); return say('باشه، ثبت نکردم.'); } return say('باشه!');
-      default: return say('متوجه نشدم. دوباره بگو یا یکی از دکمه‌های تصویری را بزن.');
+      default: {   // not a built-in command: ask the safe AI helper (answers are logged for Mana)
+        if (!lastText) return say('متوجه نشدم. دوباره بگو یا یکی از دکمه‌های تصویری را بزن.');
+        setReply('در حال فکر کردن…');
+        try { const r = await api<{ answer: string }>('/child/ask', { body: { question: lastText } }); return say(r.answer); }
+        catch (e: any) { return say(e?.body?.message ?? 'متوجه نشدم. دوباره بگو یا یکی از دکمه‌های تصویری را بزن.'); }
+      }
     }
   };
   const ask = async (it: Item) => { setChoose(null); const yes = async () => { try { const r = await api<any>('/child/complete', { body: { activity_id: it.id } }); setItems((x) => x.map((y) => (y.id === it.id ? { ...y, completion: 'pending' } : y))); await say(r.status === 'already_reported' ? 'قبلاً گفته بودی. مامان به‌زودی نگاه می‌کند.' : `آفرین ${name}! به مامان خبر دادم. وقتی تأیید کند ستاره‌ات را می‌گیری.`); } catch (e) { await say('نتوانستم ثبت کنم. ' + errText(e)); } };
     setConfirm({ text: `«${it.title}» را انجام دادی؟`, yes }); await say(`«${it.title}» را انجام دادی؟ بله یا نه؟`); };
-  const handle = async (text: string) => { setSaid(text); await run(matchCommand(text)); };
+  const handle = async (text: string) => { setSaid(text); await run(matchCommand(text), text); };
   const mic = () => {
     if (listening) { stopRef.current(); return; }
     if (!micOk) { void say('مامان هنوز اجازه‌ی میکروفون را نداده. از دکمه‌های تصویری استفاده کن.'); return; }

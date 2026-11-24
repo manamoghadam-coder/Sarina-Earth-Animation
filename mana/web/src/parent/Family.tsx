@@ -6,7 +6,7 @@ import { Avatar, DateField, Empty, Field, Loading, Modal, useAction, useLoad, us
 
 const KINDS: Record<string, string> = { homework: 'تکالیف', study: 'مطالعه درسی', class: 'کلاس', music: 'موسیقی', language: 'زبان', reading: 'کتاب', chore: 'کار خانه', story: 'قصه', writing: 'نوشتن', game: 'بازی', other: 'سایر' };
 const ICONS = ['✏️', '📖', '🎵', '💃', '🎤', '📜', '🔤', '🖍️', '📚', '🐻', '🧸', '⭐', '🎨', '🏃'];
-const TABS = [['plan', '🗓 برنامه'], ['routines', '🪥 عادت‌ها و دارو'], ['approve', '⭐ تأییدها'], ['requests', '🛍 درخواست‌ها و پیشنهادها'], ['money', '💰 مالی و پول‌توجیبی'], ['rewards', '🎁 جوایز و اهداف'], ['photos', '🖼 تصاویر'], ['notif', '🔔 اعلان‌ها و تنظیمات']] as const;
+const TABS = [['plan', '🗓 برنامه'], ['routines', '🪥 عادت‌ها و دارو'], ['approve', '⭐ تأییدها'], ['requests', '🛍 درخواست‌ها و پیشنهادها'], ['money', '💰 مالی و پول‌توجیبی'], ['ai', '🤖 گفتگوهای AI'], ['rewards', '🎁 جوایز و اهداف'], ['photos', '🖼 تصاویر'], ['notif', '🔔 اعلان‌ها و تنظیمات']] as const;
 
 export default function Family() {
   const kids = useLoad(() => api<any[]>('/children')); const [sel, setSel] = useState<string | null>(null); const [tab, setTab] = useState<(typeof TABS)[number][0]>('plan');
@@ -16,7 +16,7 @@ export default function Family() {
   return <div className="space-y-3"><ReadOnlyBanner module="children" /><h1 className="text-xl font-extrabold">خانواده</h1>
     <div className="flex gap-2">{kids.data.map((k) => <button key={k.id} onClick={() => setSel(k.id)} className={`card flex items-center gap-2 flex-1 ${k.id === kid.id ? '!border-teal-mana !bg-teal-soft' : ''}`}><Avatar id={k.avatar_photo_id} name={k.display_name} /><div className="text-start"><b>{k.display_name}</b><div className="text-xs">⭐ {fa(k.balance)} ستاره</div></div></button>)}</div>
     <div className="flex gap-2 overflow-x-auto pb-1">{TABS.map(([k, t]) => <button key={k} className={`btn whitespace-nowrap ${tab === k ? '' : 'btn-ghost'}`} onClick={() => setTab(k)}>{t}</button>)}</div>
-    {tab === 'plan' && <Plan kid={kid} />}{tab === 'routines' && <Routines kid={kid} />}{tab === 'requests' && <Requests />}{tab === 'money' && <KidMoney kid={kid} reloadKids={kids.reload} />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}
+    {tab === 'plan' && <Plan kid={kid} />}{tab === 'routines' && <Routines kid={kid} />}{tab === 'requests' && <Requests />}{tab === 'money' && <KidMoney kid={kid} reloadKids={kids.reload} />}{tab === 'ai' && <AIChats kid={kid} reload={kids.reload} />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}
     {tab === 'photos' && <Photos kid={kid} reloadKids={kids.reload} />}{tab === 'notif' && <NotifSettings kid={kid} reload={kids.reload} />}</div>;
 }
 
@@ -161,4 +161,17 @@ function KidMoney({ kid, reloadKids }: { kid: any; reloadKids: () => Promise<voi
         <button className="btn btn-teal" disabled={!g.title.trim() || !num(g.target)} onClick={() => act(async () => { await api(`/children/${kid.id}/goals`, { body: { title: g.title, icon: g.icon, target_amount: num(g.target) } }); setG({ ...g, title: '', target: '' }); await w.reload(); }, 'هدف اضافه شد')}>＋</button></div></section>
     <section className="card"><h2 className="font-bold mb-2">📚 پیشرفت درس‌های سواد مالی</h2><p>{(lessons.data ?? []).filter((l) => l.done).length} از {lessons.data?.length ?? 0} درس انجام شده.</p></section>
     <section className="card"><h2 className="font-bold mb-2">آخرین حساب‌ها</h2>{w.data?.ledger.slice(0, 10).map((l: any, i: number) => <div key={i} className="flex justify-between text-sm py-0.5"><span>{l.reason} <span className="text-slate-400">{fmtDate(String(l.at).slice(0, 10), false)}</span></span><span className={l.delta > 0 ? 'text-green-700' : 'text-red-600'}>{l.delta > 0 ? '+' : ''}{money(l.delta)}</span></div>)}</section></div>;
+}
+
+function AIChats({ kid, reload }: { kid: any; reload: () => Promise<void> }) {
+  const [only, setOnly] = useState(false); const log = useLoad(() => api<any>(`/children/${kid.id}/ai-chats${only ? '?flagged_only=1' : ''}`), [kid.id, only]); const act = useAction();
+  const save = (patch: any) => act(async () => { await api(`/children/${kid.id}/settings`, { method: 'PATCH', body: patch }); await reload(); }, 'ذخیره شد');
+  const chats = [...(log.data?.chats ?? [])].reverse();
+  return <div className="space-y-3"><section className="card"><h2 className="font-bold mb-2">تنظیمات دستیار هوشمند {kid.display_name}</h2>
+    <label className="flex items-center gap-2 py-1"><input type="checkbox" className="w-5 h-5" checked={kid.ai_enabled} onChange={(e) => save({ ai_enabled: e.target.checked })} /> پرسیدن از دستیار هوشمند فعال باشد</label>
+    <Field label="حداکثر سؤال در روز"><input type="number" min={0} max={200} className="input !w-32" defaultValue={kid.ai_daily_limit} onBlur={(e) => +e.target.value !== kid.ai_daily_limit && save({ ai_daily_limit: +e.target.value })} /></Field>
+    <p className="text-xs text-slate-500">دستیار فقط با لحن مناسب سن پاسخ می‌دهد، اطلاعات شخصی نمی‌پذیرد و موضوع‌های حساس را به شما ارجاع می‌دهد. سؤال‌های حساس اصلاً به مدل ارسال نمی‌شوند و برچسب ⚠️ می‌خورند. امروز {fa(log.data?.today ?? 0)} سؤال پرسیده شده؛ مجموع موارد حساس: {fa(log.data?.flagged ?? 0)}.</p></section>
+    <section className="card"><div className="flex items-center justify-between mb-2"><h2 className="font-bold">گفتگوها</h2><label className="text-sm flex items-center gap-1"><input type="checkbox" checked={only} onChange={(e) => setOnly(e.target.checked)} /> فقط موارد حساس ⚠️</label></div>
+      <Loading error={log.error} loading={log.loading} />{log.data && chats.length === 0 && <Empty>گفتگویی ثبت نشده.</Empty>}
+      <div className="space-y-1 max-h-[28rem] overflow-auto">{chats.map((c: any) => <div key={c.id} className={`rounded-xl px-3 py-2 text-sm ${c.role === 'user' ? 'bg-slate-100' : 'bg-teal-soft'} ${c.flagged ? 'ring-2 ring-red-300' : ''}`}><div className="text-xs text-slate-500">{c.role === 'user' ? kid.display_name : 'دستیار'} · {instantFa(c.at)} {c.flagged ? '⚠️' : ''}</div><div dir="auto" className="whitespace-pre-line">{c.content}</div></div>)}</div></section></div>;
 }

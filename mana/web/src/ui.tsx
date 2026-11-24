@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { errText, photoUrl } from './api';
 import { useLevel } from './auth';
+import { splitLang } from './langsplit';
 import { MONTHS, fa, isoFromJ, jmLen, parts, tehranToday, toEnDigits } from './jalali';
 
 export function useLoad<T>(fn: () => Promise<T>, deps: unknown[] = []) {
@@ -73,4 +74,11 @@ export function ReadOnlyBanner({ module }: { module: string }) {
 }
 export function Need({ module, children }: { module: string; children: ReactNode }) {
   return useLevel(module) >= 1 ? <>{children}</> : <div className="card text-center my-8"><div className="text-4xl">🔒</div><p className="mt-2">به این بخش دسترسی ندارید. مانا می‌تواند از «تنظیمات ← حساب‌ها و دسترسی‌ها» آن را فعال کند.</p></div>;
+}
+
+/** Renders Persian text with English runs isolated (bdi dir=ltr) so punctuation and word order display correctly. */
+export function Mixed({ text }: { text: string }) {
+  return <>{splitLang(text).length ? (() => { const out: ReactNode[] = []; let rest = text; let i = 0;
+    for (const r of splitLang(text)) { const at = rest.indexOf(r.text); if (at > 0) out.push(rest.slice(0, at)); out.push(r.lang === 'en-US' ? <bdi key={i++} dir="ltr" className="font-semibold">{r.text}</bdi> : r.text); rest = rest.slice(at + r.text.length); }
+    if (rest) out.push(rest); return out; })() : text}</>;
 }

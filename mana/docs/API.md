@@ -56,6 +56,21 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 `GET /members` · `PATCH /members/:id {permissions:{tasks?:0-2,events?,finance?,goals?,children?,photos?}, active?}` · `POST /members/:id/password {password}`.
 مسیرهای ماژول‌ها (مثل `/tasks`، `/finance/summary`، `/children`، `/photos`) برای عضو بر اساس سطح (۱ خواندن، ۲ نوشتن) مجازند؛ `/me` فیلد `permissions` را برمی‌گرداند.
 
+## مرحله‌ی ۲ (دانستنی‌ها، سواد مالی، کتابخانه، آشپزی، AI بچه‌ها، امنیت)
+| مسیر | شرح |
+|---|---|
+| `GET /facts/today` · CRUD 🔒 `/facts` | دانستنی روز (به‌تفکیک گروه سنی) + ۶ روز قبل |
+| `GET /child/lessons` · `GET /child/lessons/:id` · `POST /child/lessons/:id/answer {i}` · CRUD 🔒 `/lessons` | درس‌های سواد مالی؛ پاسخ درست هرگز به کلاینت فرستاده نمی‌شود؛ ستاره فقط یک‌بار |
+| `GET /child/wallet` · `POST /child/wallet/save {goal_id,amount}` · `POST /child/wallet/spend {amount,note}` | پول‌توجیبی مجازی، قلک و ثبت خرج کودک |
+| `POST /children/:id/wallet {delta,reason}` · `POST /children/:id/goals` · `DELETE /savings-goals/:id` 🔒 | واریز/کسر، هدف پس‌انداز (حذف = برگشت پول) |
+| `POST /library` (multipart) · `GET /library` · `GET /library/:id/file` (Range) · `PATCH/DELETE /library/:id` | PDF و صوت؛ نوع از محتوای فایل؛ هر کودک فقط موارد همه/گروه سنی خود |
+| `GET /recipe-categories` · `GET /recipes[?category_id]` · `GET /recipes/:id` · `POST/PATCH/DELETE /recipes` · `POST /recipes/:id/media` · `GET /recipe-media/:id/file` | دستور غذا با عکس و ویدیو (آپلود یا لینک) |
+| `POST /child/ask {question}` · `GET /children/:id/ai-chats[?flagged_only=1]` 🔒 | پرسش از دستیار هوشمند و ثبت گفتگو برای مانا؛ سقف روزانه، فیلتر موضوع‌های حساس |
+| `GET/POST /users` · `PATCH /users/:id` 🔒 | مدیریت حساب‌ها |
+| `GET /backups` · `POST /backups/run` · `GET /backups/:name` 🔒 | پشتیبان‌گیری |
+| `POST /auth/2fa/setup|enable|disable` 🔒 · ورود با `totp` | تأیید دومرحله‌ای (TOTP) |
+ماژول‌های جدید دسترسی: `library`، `recipes`. متغیرهای محیطی جدید: `ANTHROPIC_API_KEY`، `ANTHROPIC_MODEL`، `BACKUP_KEEP`، `BACKUP_AUTO`.
+
 ## مرحله‌ی ۱ تکمیلی: عادت‌ها و دارو، درخواست‌ها، پیشنهادها، مناسبت‌ها، جمله‌ی روز
 | مسیر | شرح |
 |---|---|

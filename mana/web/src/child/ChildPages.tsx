@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, errText, photoUrl } from '../api';
 import { useAuth } from '../auth';
 import { WEEKDAYS, fa, fmtTime } from '../jalali';
-import { Empty, Loading, Modal, useLoad, useToast } from '../ui';
+import { Empty, Loading, Mixed, Modal, useLoad, useToast } from '../ui';
 import { speak, spokenTime, ttsStatus } from '../voice';
 import { PushPanel } from '../notify';
 import { useReadable } from './ReadAloud';
@@ -15,8 +15,11 @@ const TILES = [
   { to: '/stories', icon: '🐻', title: 'قصه‌های من', desc: 'اینجا می‌توانی قصه‌های جالب گوش کنی.', c: 'var(--k4)' },
   { to: '/stars', icon: '⭐', title: 'ستاره‌های من', desc: 'اینجا تعداد ستاره‌هایی را که جمع کرده‌ای می‌بینی.', c: 'var(--k2)' },
   { to: '/week', icon: '🗓️', title: 'برنامه هفته', desc: 'اینجا برنامه‌ی کل هفته‌ات را می‌بینی.', c: 'var(--k1)' },
+  { to: '/ask', icon: '🤖', title: 'از دستیار بپرس', desc: 'اینجا هر سؤالی داری از دستیار هوشمند می‌پرسی.', c: 'var(--k1)' },
   { to: '/facts', icon: '🧠', title: 'دانستنی‌ها', desc: 'اینجا هر روز یک چیز جالب و تازه یاد می‌گیری.', c: 'var(--k3)' },
   { to: '/money', icon: '🐷', title: 'پول و پس‌انداز', desc: 'اینجا پول‌توجیبی و قلک‌هایت را می‌بینی و درس پول یاد می‌گیری.', c: 'var(--k2)' },
+  { to: '/library', icon: '📚', title: 'کتابخانه', desc: 'اینجا کتاب‌ها و قصه‌های صوتی را می‌خوانی و گوش می‌کنی.', c: 'var(--k1)' },
+  { to: '/recipes', icon: '🍳', title: 'آشپزی', desc: 'اینجا دستور غذاهای خوشمزه را می‌بینی.', c: 'var(--k4)' },
   { to: '/habits', icon: '🪥', title: 'عادت‌های من', desc: 'اینجا عادت‌های خوبت و داروهایت را تیک می‌زنی.', c: 'var(--k4)' },
   { to: '/requests', icon: '🛍️', title: 'درخواست خرید', desc: 'اینجا از مامان چیزهایی را که لازم داری می‌خواهی.', c: 'var(--k2)' },
   { to: '/suggest', icon: '💡', title: 'پیشنهاد من', desc: 'اینجا غذا یا تفریح مورد علاقه‌ات را پیشنهاد می‌دهی.', c: 'var(--k1)' },
@@ -29,7 +32,7 @@ export function Home() {
   useReadable([...(quote.data?.text ? [`جمله‌ی امروز: ${quote.data.text}`] : []), ...(fact.data?.today ? [`دانستنی امروز. ${fact.data.today.title}. ${fact.data.today.body}`] : []), ...tiles.map((t) => `${t.title}. ${t.desc}`)]);
   return <>
     {quote.data?.text && <div className="quote-card" role="note"><div className="text-sm opacity-80">✨ جمله‌ی امروز</div><p className="text-xl font-bold leading-9 mt-1">{quote.data.text}</p><button className="text-sm underline mt-1" onClick={() => speak(quote.data!.text!)}>🔊 بشنو</button></div>}
-    {fact.data?.today && <button className="kid-card w-full text-start" onClick={() => { void speak(`${fact.data.today.title}. ${fact.data.today.body}`); go('/facts'); }}><div className="text-sm opacity-70">🧠 دانستنی امروز</div><b className="text-xl" dir="auto">{fact.data.today.title}</b><p className="mt-1 line-clamp-2" dir="auto">{fact.data.today.body}</p></button>}
+    {fact.data?.today && <button className="kid-card w-full text-start" onClick={() => { void speak(`${fact.data.today.title}. ${fact.data.today.body}`); go('/facts'); }}><div className="text-sm opacity-70">🧠 دانستنی امروز</div><b className="text-xl"><Mixed text={fact.data.today.title} /></b><p className="mt-1 line-clamp-2"><Mixed text={fact.data.today.body} /></p></button>}
     {occ.data && occ.data.length > 0 && <div className="kid-card"><b className="text-lg">🎉 مناسبت‌های نزدیک</b>{occ.data.slice(0, 3).map((o) => <div key={o.id} className="flex items-center gap-2 py-1 text-lg"><span className="text-3xl">{o.icon}</span><span className="flex-1">{o.title}{o.age ? ` (${fa(o.age)} سالگی)` : ''}</span><span className="opacity-70 text-sm">{o.days_left === 0 ? 'امروز!' : o.days_left === 1 ? 'فردا' : `${fa(o.days_left)} روز دیگر`}</span></div>)}</div>}
     {photos.data && photos.data.length > 0 && <div className="flex gap-2 overflow-x-auto pb-1" aria-label="عکس‌های من">{photos.data.slice(0, 6).map((p) => <img key={p.id} src={photoUrl(p.id)} alt="" className="h-28 w-28 rounded-3xl object-cover flex-none shadow" />)}</div>}
     {today.data && <div className="kid-card flex items-center justify-between text-xl"><span>⭐ {fa(today.data.balance)} ستاره</span><span className="text-sm opacity-70">این هفته {fa(today.data.week_stars)} از {fa(today.data.settings.weekly_goal_stars)}</span></div>}

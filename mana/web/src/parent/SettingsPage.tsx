@@ -4,6 +4,7 @@ import { useAuth } from '../auth';
 import { AccessPanel } from './AccessPanel';
 import { QuotesPanel } from './QuotesPanel';
 import { ContentPanel } from './ContentPanel';
+import { AccountsPanel, BackupPanel, TwoFactorPanel } from './SecurityPanels';
 import { PushPanel } from '../notify';
 import { ttsStatus, sttSupported } from '../voice';
 import { Field, useAction } from '../ui';
@@ -14,6 +15,9 @@ export default function SettingsPage() {
     {me!.role === 'parent' && <AccessPanel />}
     {me!.role === 'parent' && <QuotesPanel />}
     {me!.role === 'parent' && <ContentPanel />}
+    {me!.role === 'parent' && <AccountsPanel />}
+    {me!.role === 'parent' && <TwoFactorPanel />}
+    {me!.role === 'parent' && <BackupPanel />}
     <section className="card"><h2 className="font-bold mb-2">🔔 اعلان روی این دستگاه</h2><PushPanel /><p className="text-xs text-slate-500 mt-2">برای دریافت اعلان هنگام بسته بودن برنامه، باید روی هر دستگاه یک‌بار فعال شود.</p></section>
     <section className="card"><h2 className="font-bold mb-2">🎙️ وضعیت قابلیت صوتی این دستگاه</h2>
       <p>خواندن متن فارسی: <b>{({ ok: 'آماده (صدای فارسی موجود)', maybe: 'موتور گفتار هست ولی صدای فارسی گزارش نشده؛ آزمایش کنید', none: 'پشتیبانی نمی‌شود' })[ttsStatus()]}</b></p>

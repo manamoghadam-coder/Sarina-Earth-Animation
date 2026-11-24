@@ -36,7 +36,7 @@ cd ../server && npm start                 # http://localhost:8080  (+ scheduler 
 
 ## تست
 ```bash
-cd mana/server && npm test        # ۱۶ تست: امنیت/RLS، جداسازی کودکان، عکس‌ها، ستاره‌ها، مالی، AI، scheduler
+cd mana/server && npm test        # ۲۶ تست: امنیت/RLS، جداسازی کودکان، عکس‌ها، ستاره‌ها، مالی، AI، scheduler
 cd mana/web && npm run typecheck
 # تست مرورگر (Playwright؛ API صوتی stub می‌شود):
 PW_MANA=… PW_SARINA=… PW_SAMAN=… node mana/e2e/e2e.cjs ./shots

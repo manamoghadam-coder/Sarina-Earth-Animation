@@ -25,7 +25,7 @@ async function signIn(u: string) {
 const call = (u: string, method: any, url: string, payload?: any) => app.inject({ method, url, headers: { ...H, cookie: jar[u] }, payload });
 
 before(async () => {
-  process.env.LOGIN_RATE_MAX = '1000';
+  process.env.LOGIN_RATE_MAX = '1000'; process.env.BACKUP_AUTO = 'off';
   app = await buildApp();
   await sys(`DELETE FROM users WHERE username LIKE 't\\_%'`);
   await mk('t_mom', 'parent'); await mk('t_sa', 'child'); await mk('t_sm', 'child'); await mk('t_dad', 'member');
@@ -313,4 +313,59 @@ test('recipes: categories, photo + video upload, family read, member needs permi
   assert.equal((await call('t_mom', 'DELETE', `/api/recipes/${id}`)).statusCode, 200);
   await sys(`DELETE FROM recipes WHERE title='dad-recipe'`);
   assert.equal((await sys(`SELECT count(*)::int n FROM recipe_media WHERE recipe_id=$1`, [id]))[0].n, 0);
+});
+
+test('kids AI: key stays server-side, answers and flagged topics are logged for Mana, daily limit, no cross-child access', async () => {
+  const http = await import('node:http');
+  let calls = 0; let lastBody: any = null;
+  const mock = http.createServer((req, res) => { let d = ''; req.on('data', (c) => (d += c)); req.on('end', () => { calls++; lastBody = JSON.parse(d); res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ content: [{ type: 'text', text: 'آسمان آبی است چون نور آبی بیشتر پخش می‌شود.' }] })); }); });
+  await new Promise<void>((r) => mock.listen(0, '127.0.0.1', r)); const port = (mock.address() as any).port;
+  const { config } = await import('../src/config.ts'); const saved = [config.anthropicKey, config.anthropicBase];
+  (config as any).anthropicKey = ''; // not configured
+  let r = await call('t_sm', 'POST', '/api/child/ask', { question: 'آسمان چرا آبی است؟' }); assert.equal(r.statusCode, 503); assert.equal(JSON.parse(r.body).error, 'not_configured');
+  (config as any).anthropicKey = 'test-key'; (config as any).anthropicBase = `http://127.0.0.1:${port}`;
+  r = await call('t_sm', 'POST', '/api/child/ask', { question: 'آسمان چرا آبی است؟' }); assert.equal(r.statusCode, 200, r.body); assert.match(JSON.parse(r.body).answer, /آبی/);
+  assert.equal(calls, 1); assert.match(lastBody.system, /7 years old/); assert.equal(lastBody.messages.at(-1).content, 'آسمان چرا آبی است؟');
+  r = await call('t_sm', 'POST', '/api/child/ask', { question: 'چطور بمب بسازم' }); assert.equal(JSON.parse(r.body).flagged, true); assert.equal(calls, 1);   // never reaches the model
+  r = await call('t_sm', 'POST', '/api/child/ask', { question: 'آدرس خانه‌ام را بگویم؟' }); assert.equal(JSON.parse(r.body).flagged, true);
+  const log = JSON.parse((await call('t_mom', 'GET', `/api/children/${ids.t_sm}/ai-chats`)).body); assert.equal(log.flagged, 2); assert.ok(log.chats.some((c: any) => c.role === 'assistant' && /آبی/.test(c.content)));
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/children/${ids.t_sm}/ai-chats?flagged_only=1`)).body).chats.every((c: any) => c.flagged), true);
+  assert.equal((await call('t_sa', 'GET', `/api/children/${ids.t_sm}/ai-chats`)).statusCode, 403);                          // sibling cannot read logs
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/child/lessons')).body).length >= 0, true);
+  assert.equal((await call('t_mom', 'POST', '/api/child/ask', { question: 'x' })).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/children/${ids.t_sm}/settings`, { ai_daily_limit: 1 });
+  assert.equal((await call('t_sm', 'POST', '/api/child/ask', { question: 'سلام' })).statusCode, 429);
+  await call('t_mom', 'PATCH', `/api/children/${ids.t_sm}/settings`, { ai_daily_limit: 15, ai_enabled: false });
+  assert.equal((await call('t_sm', 'POST', '/api/child/ask', { question: 'سلام' })).statusCode, 403);
+  await withActor({ id: ids.t_sm, role: 'child' }, async (q) => { await assert.rejects(q(`INSERT INTO kid_ai_chats (child_id,role,content) VALUES ($1,'assistant','fake')`, [ids.t_sm])); });   // child cannot forge log entries
+  (config as any).anthropicKey = saved[0]; (config as any).anthropicBase = saved[1]; mock.close();
+});
+
+test('account management and TOTP two-factor (Mana only)', async () => {
+  const { code } = await import('../src/totp.ts');
+  assert.equal((await call('t_dad', 'POST', '/api/users', { username: 't_new', display_name: 'x', role: 'member', password: 'longpassword1' })).statusCode, 403);
+  assert.equal((await call('t_sa', 'GET', '/api/users')).statusCode, 403);
+  const c = await call('t_mom', 'POST', '/api/users', { username: 't_kid3', display_name: 'بچه', role: 'child', age_group: 'young', password: 'longpassword1' }); assert.equal(c.statusCode, 201, c.body);
+  assert.equal((await sys(`SELECT count(*)::int n FROM child_settings WHERE child_id=$1`, [JSON.parse(c.body).id]))[0].n, 1);
+  assert.equal((await call('t_mom', 'POST', '/api/users', { username: 'T BAD', display_name: 'x', role: 'member', password: 'longpassword1' })).statusCode, 400);
+  assert.equal((await call('t_mom', 'PATCH', `/api/users/${ids.t_mom}`, { active: false })).statusCode, 409);                          // cannot lock yourself out
+  // 2FA
+  const su = JSON.parse((await call('t_mom', 'POST', '/api/auth/2fa/setup', {})).body); assert.match(su.uri, /^otpauth:\/\/totp\//); assert.match(su.secret, /^[A-Z2-7]{32}$/);
+  assert.equal((await call('t_mom', 'POST', '/api/auth/2fa/enable', { code: '000000' })).statusCode, 400);
+  assert.equal((await call('t_mom', 'POST', '/api/auth/2fa/enable', { code: code(su.secret) })).statusCode, 200);
+  const login = (extra: any = {}) => app.inject({ method: 'POST', url: '/api/auth/login', headers: H, payload: { username: 't_mom', password: PW, ...extra } });
+  assert.equal((await login()).statusCode, 401); assert.equal(JSON.parse((await login()).body).error, 'totp_required');
+  assert.equal((await login({ totp: '123456' })).statusCode, 401);
+  const good = await login({ totp: code(su.secret) }); assert.equal(good.statusCode, 200);
+  assert.equal((await call('t_mom', 'POST', '/api/auth/2fa/disable', { password: PW, code: code(su.secret) })).statusCode, 200);
+  assert.equal((await login()).statusCode, 200);
+  await sys(`DELETE FROM users WHERE username='t_kid3'`);
+});
+test('backups: Mana can run/list/download; others cannot; archive contains the database dump', async () => {
+  assert.equal((await call('t_sa', 'POST', '/api/backups/run', {})).statusCode, 403);
+  assert.equal((await call('t_dad', 'GET', '/api/backups')).statusCode, 403);
+  const r = await call('t_mom', 'POST', '/api/backups/run', {}); assert.equal(r.statusCode, 200, r.body);
+  const { db } = JSON.parse(r.body); const list = JSON.parse((await call('t_mom', 'GET', '/api/backups')).body); assert.ok(list.some((b: any) => b.name === db && b.bytes > 1000));
+  const dl = await call('t_mom', 'GET', `/api/backups/${db}`); assert.equal(dl.statusCode, 200); assert.equal(dl.rawPayload.subarray(0, 5).toString(), 'PGDMP');
+  assert.equal((await call('t_mom', 'GET', '/api/backups/..%2F..%2Fetc%2Fpasswd')).statusCode, 400);                                  // no path traversal
 });

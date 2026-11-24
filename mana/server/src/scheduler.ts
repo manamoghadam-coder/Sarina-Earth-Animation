@@ -1,6 +1,7 @@
 import { sys } from './db.ts';
 import { addDays, persianWeekday, tehranInstant, tehranParts, toFaDigits, todayISO } from './jalali.ts';
 import { sendPush } from './push.ts';
+import { runBackup, todaysBackupExists } from './backup.ts';
 import { fmtMoney } from './util.ts';
 
 const GRACE_MIN = 10;      // a reminder is still delivered if the server was briefly down
@@ -65,6 +66,19 @@ export async function generate(now = new Date()) {
   const debts = await sys(`SELECT * FROM debts WHERE status='open' AND next_due_date IN ($1,$2)`, [today, addDays(today, 3)]);
   for (const d of debts) { const due = tehranInstant(today, '09:00'); if (now >= due && now.getTime() - due.getTime() <= 4 * 3600000) await enqueue({ user_id: mom.id, kind: 'debt', title: d.title, body: `${d.next_due_date === today ? 'امروز' : 'سه روز دیگر'} سررسید: ${d.title}${d.installment_amount ? ' — ' + fmtMoney(d.installment_amount) + ' تومان' : ''}`, icon: '💳', due, key: `debt:${d.id}:${d.next_due_date}:${d.next_due_date === today ? 0 : 3}`, ref_type: 'debt', ref_id: d.id }); }
   const at = (h: string) => tehranInstant(today, h);
+  // nightly backup at 03:00 (once per day)
+  if (nowP.hour >= 3 && process.env.BACKUP_AUTO !== 'off' && !todaysBackupExists(today.replace(/-/g, ''))) {
+    try { await runBackup(); } catch (e: any) { await enqueue({ user_id: mom.id, kind: 'backup', title: 'پشتیبان‌گیری ناموفق بود', body: `پشتیبان‌گیری خودکار انجام نشد: ${String(e.message).slice(0, 120)}`, icon: '⚠️', due: now, key: `backupfail:${today}` }); }
+  }
+  // Friday 18:00 weekly report for Mana
+  if (wd === 6 && now >= at('18:00') && now.getTime() - at('18:00').getTime() <= 4 * 3600000) {
+    const kidsRows = await sys(`SELECT u.display_name, COALESCE((SELECT SUM(delta) FROM star_ledger s WHERE s.child_id=u.id AND delta>0 AND s.at > now() - interval '7 days'),0)::int stars, (SELECT count(*)::int FROM routine_logs l WHERE l.child_id=u.id AND l.day > current_date - 7) habits FROM users u WHERE u.role='child' AND u.active ORDER BY u.display_name`);
+    const [t] = await sys(`SELECT count(*) FILTER (WHERE status='done' AND done_at > now() - interval '7 days')::int done, count(*) FILTER (WHERE status IN ('todo','doing','waiting'))::int open FROM tasks`);
+    const [rq] = await sys(`SELECT count(*)::int n FROM purchase_requests WHERE status='requested'`);
+    const [sp] = await sys(`SELECT COALESCE(SUM(amount),0)::bigint s FROM transactions WHERE kind='expense' AND occurred_on > $1`, [addDays(today, -7)]);
+    await enqueue({ user_id: mom.id, kind: 'weekly', title: 'گزارش هفتگی خانواده', icon: '📊', due: at('18:00'), key: `weekly:${today}`,
+      body: `${kidsRows.map((k: any) => `${k.display_name}: ${toFaDigits(k.stars)} ستاره، ${toFaDigits(k.habits)} عادت`).join(' | ')} — کار انجام‌شده: ${toFaDigits(t.done)}، باز: ${toFaDigits(t.open)} — درخواست خرید منتظر: ${toFaDigits(rq.n)} — هزینه‌ی هفته: ${fmtMoney(sp.s)} تومان` });
+  }
   if (now >= at('07:00') && now.getTime() - at('07:00').getTime() <= 3 * 3600000) {
     const top = await sys(`SELECT title FROM tasks WHERE status IN ('todo','doing') ORDER BY priority, due_date NULLS LAST LIMIT 3`);
     const [{ ev }] = await sys(`SELECT count(*)::int ev FROM events WHERE starts_at::timestamptz >= $1 AND starts_at < $2`, [at('00:00'), at('23:59')]);
