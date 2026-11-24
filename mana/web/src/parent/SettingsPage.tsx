@@ -4,7 +4,7 @@ import { useAuth } from '../auth';
 import { AccessPanel } from './AccessPanel';
 import { QuotesPanel } from './QuotesPanel';
 import { ContentPanel } from './ContentPanel';
-import { AccountsPanel, BackupPanel, TwoFactorPanel } from './SecurityPanels';
+import { AccountsPanel, BackupPanel, MessengerPanel, TwoFactorPanel } from './SecurityPanels';
 import { PushPanel } from '../notify';
 import { ttsStatus, sttSupported } from '../voice';
 import { Field, useAction } from '../ui';
@@ -13,6 +13,7 @@ export default function SettingsPage() {
   const { logout, me } = useAuth(); const act = useAction(); const [cur, setCur] = useState(''); const [nxt, setNxt] = useState('');
   return <div className="space-y-4 max-w-xl"><h1 className="text-xl font-extrabold">تنظیمات</h1>
     {me!.role === 'parent' && <AccessPanel />}
+    <MessengerPanel />
     {me!.role === 'parent' && <QuotesPanel />}
     {me!.role === 'parent' && <ContentPanel />}
     {me!.role === 'parent' && <AccountsPanel />}

@@ -1,15 +1,33 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { api, errText } from '../api';
 import { useAuth } from '../auth';
 import { instantFa } from '../jalali';
-import { Empty, Field, useAction, useLoad } from '../ui';
+import { Empty, Field, useAction, useLoad, useToast } from '../ui';
 
 const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
 export function BackupPanel() {
-  const b = useLoad(() => api<any[]>('/backups')); const act = useAction(); const [busy, setBusy] = useState(false);
-  return <section className="card"><h2 className="font-bold mb-1">💾 پشتیبان‌گیری</h2><p className="text-sm text-slate-500 mb-2">هر شب ساعت ۳ بامداد خودکار از پایگاه داده و فایل‌ها (عکس‌ها، کتابخانه، آشپزی) نسخه‌ی پشتیبان گرفته می‌شود و ۷ نسخه‌ی آخر می‌ماند. برای امنیت بیشتر، گاهی نسخه را دانلود و بیرون از سرور نگه دارید.</p>
-    <button className="btn btn-teal mb-2" disabled={busy} onClick={async () => { setBusy(true); await act(async () => { await api('/backups/run', { body: {} }); await b.reload(); }, 'پشتیبان ساخته شد'); setBusy(false); }}>{busy ? 'در حال ساخت…' : 'ساخت پشتیبان همین حالا'}</button>
-    {b.data?.length === 0 && <Empty>هنوز پشتیبانی نیست.</Empty>}{b.data?.slice(0, 8).map((x) => <div key={x.name} className="flex justify-between text-sm py-1 border-b border-slate-100"><span dir="ltr">{x.name}</span><span>{mb(x.bytes)} · {instantFa(x.at)} · <a className="underline" href={`/api/backups/${x.name}`}>دانلود</a></span></div>)}</section>;
+  const b = useLoad(() => api<any>('/backups')); const act = useAction(); const toast = useToast(); const [busy, setBusy] = useState(false); const [iv, setIv] = useState<string>(''); const [keep, setKeep] = useState<string>('');
+  const run = async (force: boolean) => { setBusy(true); try { const r = await api<any>(`/backups/run${force ? '?force=1' : ''}`, { body: {} }); toast(r.db || r.files ? 'پشتیبان ساخته شد' : 'از آخرین پشتیبان تغییری نکرده؛ نسخه‌ی تکراری ساخته نشد'); await b.reload(); } catch (e) { toast(errText(e), 'err'); } finally { setBusy(false); } };
+  return <section className="card"><h2 className="font-bold mb-1">💾 پشتیبان‌گیری</h2><p className="text-sm text-slate-500 mb-2">پشتیبان خودکار در بازه‌ی زمانی تنظیم‌شده انجام می‌شود (پیش‌فرض هر ۲۴ ساعت، بعد از ساعت ۳ بامداد). <b>اگر از آخرین پشتیبان چیزی تغییر نکرده باشد، نسخه‌ی تکراری ساخته نمی‌شود</b>؛ پایگاه داده و فایل‌ها (عکس، کتابخانه، آشپزی، پیوست‌ها) جدا بررسی می‌شوند و فقط بخشِ تغییرکرده نسخه‌ی تازه می‌گیرد. آخرین نسخه‌ی هر بخش هرگز پاک نمی‌شود.</p>
+    <div className="flex gap-2 items-end flex-wrap mb-2"><Field label="بازه (ساعت)"><input className="input !w-24" type="number" min={1} max={168} value={iv || b.data?.intervalHours || 24} onChange={(e) => setIv(e.target.value)} /></Field><Field label="تعداد نسخه‌ی نگهداری"><input className="input !w-24" type="number" min={2} max={60} value={keep || b.data?.keep || 7} onChange={(e) => setKeep(e.target.value)} /></Field>
+      <button className="btn mb-3" onClick={() => act(async () => { await api('/backups/settings', { method: 'PUT', body: { interval_hours: +(iv || b.data?.intervalHours || 24), keep: +(keep || b.data?.keep || 7) } }); await b.reload(); }, 'ذخیره شد')}>ثبت</button></div>
+    <p className="text-xs text-slate-500 mb-2">آخرین بررسی: {b.data?.lastCheck ? instantFa(b.data.lastCheck) : 'هنوز انجام نشده'}</p>
+    <div className="flex gap-2 flex-wrap mb-2"><button className="btn btn-teal" disabled={busy} onClick={() => run(false)}>{busy ? 'در حال بررسی…' : 'پشتیبان‌گیری (فقط اگر تغییری بوده)'}</button><button className="btn btn-ghost" disabled={busy} onClick={() => run(true)}>ساخت اجباری</button></div>
+    {b.data?.items.length === 0 && <Empty>هنوز پشتیبانی نیست.</Empty>}{b.data?.items.slice(0, 8).map((x: any) => <div key={x.name} className="flex justify-between text-sm py-1 border-b border-slate-100"><span dir="ltr">{x.name}</span><span>{mb(x.bytes)} · {instantFa(x.at)} · <a className="underline" href={`/api/backups/${x.name}`}>دانلود</a></span></div>)}</section>;
+}
+
+const PROV: Record<string, string> = { bale: 'بله', telegram: 'تلگرام' };
+/** Link the account to Bale / Telegram so notifications also arrive as bot messages. Switching provider is a server setting (MESSENGER_PROVIDERS). */
+export function MessengerPanel() {
+  const st = useLoad(() => api<any>('/messenger/status')); const act = useAction(); const toast = useToast(); const [code, setCode] = useState<Record<string, string>>({});
+  return <section className="card"><h2 className="font-bold mb-1">💬 اتصال به بله / تلگرام</h2><p className="text-sm text-slate-500 mb-2">اعلان‌های مهم (رویدادها، اقساط، گزارش هفتگی، درخواست‌ها) علاوه بر اعلان برنامه، در پیام‌رسان هم می‌آید و با دستورهای <code>/today</code>، <code>/list</code>، <code>/add</code> می‌توانید از آنجا خلاصه‌ی امروز و لیست خرید را ببینید. بله به‌صورت پیش‌فرض فعال است؛ تلگرام هم در صورت فعال بودن توکنش روی سرور قابل اتصال است.</p>
+    {st.data?.providers.map((p: any) => <div key={p.provider} className="border border-slate-200 rounded-2xl p-3 mb-2"><div className="flex items-center justify-between"><b>{PROV[p.provider]}</b>
+      {!p.active ? <span className="chip">روی سرور فعال نیست</span> : p.link ? <span className="chip !bg-green-100">متصل ✅</span> : <span className="chip">متصل نیست</span>}</div>
+      {p.active && !p.link && <div className="mt-2">{code[p.provider] ? <div className="text-sm">در {PROV[p.provider]} به ربات پیام بدهید: <code dir="ltr" className="select-all">/start {code[p.provider]}</code> (۱۰ دقیقه اعتبار)</div>
+        : <button className="btn btn-teal" onClick={() => act(async () => { const r = await api<any>('/messenger/link-code', { body: { provider: p.provider } }); setCode({ ...code, [p.provider]: r.code }); })}>دریافت کد اتصال</button>}</div>}
+      {p.link && <div className="flex gap-2 flex-wrap mt-2"><label className="text-sm flex items-center gap-1"><input type="checkbox" checked={p.link.enabled} onChange={(e) => act(async () => { await api('/messenger/toggle', { body: { provider: p.provider, enabled: e.target.checked } }); await st.reload(); })} /> ارسال اعلان‌ها</label>
+        <button className="btn btn-ghost !py-1" onClick={async () => { try { const r = await api<any>('/messenger/test', { body: {} }); toast(r.status ?? 'ارسال شد'); } catch (e) { toast(errText(e), 'err'); } }}>پیام آزمایشی</button>
+        <button className="btn btn-ghost !py-1" onClick={() => act(async () => { await api('/messenger/unlink', { body: { provider: p.provider } }); setCode({}); await st.reload(); }, 'قطع شد')}>قطع اتصال</button></div>}</div>)}</section>;
 }
 
 export function AccountsPanel() {

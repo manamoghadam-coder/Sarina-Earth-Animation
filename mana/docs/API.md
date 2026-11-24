@@ -84,3 +84,14 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 | `GET /occasions/upcoming?days` | مناسبت‌های نزدیک با روزهای باقی‌مانده و سن |
 | `GET /quote/today` · CRUD `/quotes` | جمله‌ی روز بر اساس گروه سنی (`young|teen|adult`) |
 ماژول جدید دسترسی: `debts` (بدهی و اقساط) جدا از `finance`.
+
+## مرحله‌ی ۳: پیام‌رسان، لیست خرید، سلامت، پیوست، پشتیبان
+| مسیر | شرح |
+|---|---|
+| `GET /messenger/status` · `POST /messenger/link-code {provider: bale|telegram}` · `POST /messenger/toggle` · `POST /messenger/unlink` · `POST /messenger/test` | اتصال حساب به ربات (بزرگسالان) |
+| ربات: `/start کد` · `/today` · `/list` · `/add نام` · `/unlink` · `/help` | دستورهای ربات (long polling؛ بدون وب‌هوک) |
+| `GET/POST /shopping` · `POST /shopping/:id/status` · `DELETE /shopping/:id` · `POST /shopping/clear-bought` · `POST /purchase-requests/:id/to-shopping` | لیست خرید (ماژول shopping) |
+| CRUD `/health-records` · `POST /health-records/:id/done` · `GET /people` | سلامت (ماژول health) |
+| `GET/POST /tasks/:id/files` · `GET/DELETE /task-files/:id[/file]` | پیوست کار: PDF، عکس، docx/xlsx/pptx تا ۲۵MB |
+| `GET /backups` (+ `intervalHours`, `keep`, `lastCheck`) · `PUT /backups/settings` · `POST /backups/run[?force=1]` | پشتیبان بدون تکرار؛ نتیجه شامل `skipped` برای بخش‌های بدون تغییر |
+متغیرهای محیطی: `MESSENGER_PROVIDERS`، `BALE_BOT_TOKEN`، `BALE_API_BASE`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_API_BASE`، `BACKUP_INTERVAL_HOURS`، `BACKUP_KEEP`.

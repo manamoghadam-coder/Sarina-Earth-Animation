@@ -1,12 +1,20 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { api, errText } from '../api';
 import { fmtDate, fmtTime } from '../jalali';
-import { DateField, Empty, Field, Loading, Modal, useAction, useLoad , ReadOnlyBanner } from '../ui';
+import { useLevel } from '../auth';
+import { DateField, Empty, Field, Loading, Modal, useAction, useLoad, useToast, ReadOnlyBanner } from '../ui';
 
 const ST: Record<string, string> = { todo: 'انجام‌نشده', doing: 'در حال انجام', waiting: 'منتظر اقدام دیگران', done: 'انجام‌شده', cancelled: 'لغوشده' };
 const PR = ['', 'بالا', 'متوسط', 'پایین'];
+function TaskFiles({ id, canWrite }: { id: string; canWrite: boolean }) {
+  const files = useLoad(() => api<any[]>(`/tasks/${id}/files`), [id]); const toast = useToast(); const act = useAction();
+  const upload = async (fl: FileList | null) => { if (!fl?.[0]) return; const fd = new FormData(); fd.append('file', fl[0]); try { await api(`/tasks/${id}/files`, { form: fd }); toast('پیوست شد'); await files.reload(); } catch (e) { toast(errText(e), 'err'); } };
+  return <div className="mb-3"><span className="label">📎 فایل‌های پیوست</span>{files.data?.length === 0 && <p className="text-xs text-slate-500">پیوستی نیست.</p>}
+    {files.data?.map((f) => <div key={f.id} className="flex items-center justify-between text-sm py-1 border-b border-slate-100"><a className="underline truncate" href={`/api/task-files/${f.id}/file`} target="_blank" rel="noreferrer">{f.orig_name}</a>{canWrite && <button aria-label="حذف" onClick={() => act(async () => { await api(`/task-files/${f.id}`, { method: 'DELETE' }); await files.reload(); })}>🗑</button>}</div>)}
+    {canWrite && <input type="file" className="input mt-2" accept="application/pdf,image/*,.docx,.xlsx,.pptx" onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} />}<p className="text-xs text-slate-500 mt-1">PDF، عکس، Word، Excel یا PowerPoint تا ۲۵ مگابایت.</p></div>;
+}
 export default function Tasks() {
-  const tasks = useLoad(() => api<any[]>('/tasks')); const projects = useLoad(() => api<any[]>('/projects'));
+  const lvTasks = useLevel('tasks'); const tasks = useLoad(() => api<any[]>('/tasks')); const projects = useLoad(() => api<any[]>('/projects'));
   const [filter, setFilter] = useState('open'); const [edit, setEdit] = useState<any | null>(null); const [proj, setProj] = useState(false); const act = useAction();
   const list = (tasks.data ?? []).filter((t) => (filter === 'open' ? ['todo', 'doing', 'waiting'].includes(t.status) : filter === 'all' ? true : t.status === filter));
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tehran' }).format(new Date());
@@ -29,6 +37,7 @@ export default function Tasks() {
       <Field label="تاریخ شروع"><DateField allowEmpty value={edit.start_date} onChange={(v) => setEdit({ ...edit, start_date: v })} /></Field>
       <Field label="مهلت (تاریخ)"><DateField allowEmpty value={edit.due_date} onChange={(v) => setEdit({ ...edit, due_date: v })} /></Field>
       <Field label="ساعت مهلت (اختیاری، برای اعلان)"><input type="time" className="input" value={edit.due_time ?? ''} onChange={(e) => setEdit({ ...edit, due_time: e.target.value || null })} /></Field>
+      {edit.id ? <TaskFiles id={edit.id} canWrite={lvTasks >= 2} /> : <p className="text-xs text-slate-500 mb-3">برای پیوست فایل، ابتدا کار را ذخیره کنید.</p>}
       <div className="flex gap-2"><button className="btn btn-teal flex-1" onClick={() => act(async () => { const b = { title: edit.title, description: edit.description ?? null, assignee: edit.assignee ?? null, project_id: edit.project_id ?? null, priority: edit.priority, status: edit.status, start_date: edit.start_date ?? null, due_date: edit.due_date ?? null, due_time: edit.due_time ?? null };
         edit.id ? await api(`/tasks/${edit.id}`, { method: 'PATCH', body: b }) : await api('/tasks', { body: b }); setEdit(null); await tasks.reload(); }, 'ذخیره شد')}>ذخیره</button>
         {edit.id && <button className="btn btn-danger" onClick={() => confirm('این کار حذف شود؟') && act(async () => { await api(`/tasks/${edit.id}`, { method: 'DELETE' }); setEdit(null); await tasks.reload(); })}>حذف</button>}</div></Modal>}

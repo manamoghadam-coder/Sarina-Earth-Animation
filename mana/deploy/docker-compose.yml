@@ -23,6 +23,9 @@ services:
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY}"
       VAPID_SUBJECT: "${VAPID_SUBJECT}"
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      MESSENGER_PROVIDERS: "${MESSENGER_PROVIDERS:-bale}"
+      BALE_BOT_TOKEN: "${BALE_BOT_TOKEN:-}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       NODE_ENV: production
   caddy:
     image: caddy:2
