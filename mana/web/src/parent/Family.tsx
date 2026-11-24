@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { api, photoUrl } from '../api';
 import { WEEKDAYS, fa, fmtDate, instantFa, fmtTime } from '../jalali';
+import { money } from '../jalali';
 import { Avatar, DateField, Empty, Field, Loading, Modal, useAction, useLoad, useToast , ReadOnlyBanner } from '../ui';
 
 const KINDS: Record<string, string> = { homework: 'تکالیف', study: 'مطالعه درسی', class: 'کلاس', music: 'موسیقی', language: 'زبان', reading: 'کتاب', chore: 'کار خانه', story: 'قصه', writing: 'نوشتن', game: 'بازی', other: 'سایر' };
 const ICONS = ['✏️', '📖', '🎵', '💃', '🎤', '📜', '🔤', '🖍️', '📚', '🐻', '🧸', '⭐', '🎨', '🏃'];
-const TABS = [['plan', '🗓 برنامه'], ['routines', '🪥 عادت‌ها و دارو'], ['approve', '⭐ تأییدها'], ['requests', '🛍 درخواست‌ها و پیشنهادها'], ['rewards', '🎁 جوایز و اهداف'], ['photos', '🖼 تصاویر'], ['notif', '🔔 اعلان‌ها و تنظیمات']] as const;
+const TABS = [['plan', '🗓 برنامه'], ['routines', '🪥 عادت‌ها و دارو'], ['approve', '⭐ تأییدها'], ['requests', '🛍 درخواست‌ها و پیشنهادها'], ['money', '💰 مالی و پول‌توجیبی'], ['rewards', '🎁 جوایز و اهداف'], ['photos', '🖼 تصاویر'], ['notif', '🔔 اعلان‌ها و تنظیمات']] as const;
 
 export default function Family() {
   const kids = useLoad(() => api<any[]>('/children')); const [sel, setSel] = useState<string | null>(null); const [tab, setTab] = useState<(typeof TABS)[number][0]>('plan');
@@ -15,7 +16,7 @@ export default function Family() {
   return <div className="space-y-3"><ReadOnlyBanner module="children" /><h1 className="text-xl font-extrabold">خانواده</h1>
     <div className="flex gap-2">{kids.data.map((k) => <button key={k.id} onClick={() => setSel(k.id)} className={`card flex items-center gap-2 flex-1 ${k.id === kid.id ? '!border-teal-mana !bg-teal-soft' : ''}`}><Avatar id={k.avatar_photo_id} name={k.display_name} /><div className="text-start"><b>{k.display_name}</b><div className="text-xs">⭐ {fa(k.balance)} ستاره</div></div></button>)}</div>
     <div className="flex gap-2 overflow-x-auto pb-1">{TABS.map(([k, t]) => <button key={k} className={`btn whitespace-nowrap ${tab === k ? '' : 'btn-ghost'}`} onClick={() => setTab(k)}>{t}</button>)}</div>
-    {tab === 'plan' && <Plan kid={kid} />}{tab === 'routines' && <Routines kid={kid} />}{tab === 'requests' && <Requests />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}
+    {tab === 'plan' && <Plan kid={kid} />}{tab === 'routines' && <Routines kid={kid} />}{tab === 'requests' && <Requests />}{tab === 'money' && <KidMoney kid={kid} reloadKids={kids.reload} />}{tab === 'approve' && <Approvals reloadKids={kids.reload} />}{tab === 'rewards' && <Rewards kid={kid} reloadKids={kids.reload} />}
     {tab === 'photos' && <Photos kid={kid} reloadKids={kids.reload} />}{tab === 'notif' && <NotifSettings kid={kid} reload={kids.reload} />}</div>;
 }
 
@@ -139,4 +140,25 @@ function Requests() {
     <section className="card"><h2 className="font-bold mb-2">💡 پیشنهادهای بچه‌ها</h2>{sug.data?.length === 0 && <Empty>پیشنهادی نیست.</Empty>}
       {sug.data?.map((s) => <div key={s.id} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"><span>{s.kind === 'food' ? '🍕' : s.kind === 'fun' ? '🎡' : '💭'} {s.child}: {s.text}</span>
         <span className="flex gap-1">{s.status === 'new' && <button className="btn btn-ghost !py-1" onClick={() => act(async () => { await api(`/suggestions/${s.id}/status`, { body: { status: 'seen' } }); await sug.reload(); })}>دیدم</button>}{s.status !== 'done' ? <button className="btn btn-teal !py-1" onClick={() => act(async () => { await api(`/suggestions/${s.id}/status`, { body: { status: 'done' } }); await sug.reload(); })}>انجام شد</button> : <span className="chip">✅</span>}</span></div>)}</section></div>;
+}
+
+const WD = ['شنبه', 'یکشنبه', 'دوشنبه', 'سه‌شنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'];
+function KidMoney({ kid, reloadKids }: { kid: any; reloadKids: () => Promise<void> }) {
+  const w = useLoad(() => api<any>(`/child/wallet?child_id=${kid.id}`), [kid.id]); const lessons = useLoad(() => api<any[]>(`/child/lessons?child_id=${kid.id}`), [kid.id]); const act = useAction();
+  const [adj, setAdj] = useState({ amount: '', reason: '' }); const [g, setG] = useState({ title: '', icon: '🚲', target: '' }); const [al, setAl] = useState<string>(String(kid.allowance_amount ?? 0));
+  const num = (s: string) => Number(s.replace(/[^\d]/g, '')) || 0;
+  const save = (patch: any) => act(async () => { await api(`/children/${kid.id}/settings`, { method: 'PATCH', body: patch }); await reloadKids(); }, 'ذخیره شد');
+  return <div className="space-y-3">
+    <section className="card"><h2 className="font-bold mb-1">پول‌توجیبی {kid.display_name}: {w.data ? money(w.data.balance) : '…'} تومان</h2><p className="text-xs text-slate-500 mb-2">پول مجازی است (برای آموزش سواد مالی): شما ثبت می‌کنید و بچه می‌بیند، پس‌انداز می‌کند و خرج‌هایش را ثبت می‌کند.</p>
+      <div className="flex gap-2 flex-wrap"><input className="input !w-36" inputMode="numeric" dir="ltr" placeholder="مبلغ" value={adj.amount} onChange={(e) => setAdj({ ...adj, amount: e.target.value })} /><input className="input flex-1" placeholder="دلیل (مثلاً عیدی، پاداش)" value={adj.reason} onChange={(e) => setAdj({ ...adj, reason: e.target.value })} />
+        <button className="btn btn-teal" disabled={!num(adj.amount) || !adj.reason.trim()} onClick={() => act(async () => { await api(`/children/${kid.id}/wallet`, { body: { delta: num(adj.amount), reason: adj.reason } }); setAdj({ amount: '', reason: '' }); await w.reload(); }, 'اضافه شد')}>＋ واریز</button>
+        <button className="btn btn-ghost" disabled={!num(adj.amount) || !adj.reason.trim()} onClick={() => act(async () => { await api(`/children/${kid.id}/wallet`, { body: { delta: -num(adj.amount), reason: adj.reason } }); setAdj({ amount: '', reason: '' }); await w.reload(); }, 'کسر شد')}>－ کسر</button></div>
+      <div className="flex gap-2 items-center mt-3 flex-wrap"><span>پول‌توجیبی هفتگی خودکار:</span><input className="input !w-32" inputMode="numeric" dir="ltr" value={al} onChange={(e) => setAl(e.target.value)} /><span>تومان، هر</span>
+        <select className="input !w-32" value={kid.allowance_weekday} onChange={(e) => save({ allowance_weekday: +e.target.value })}>{WD.map((d, i) => <option key={i} value={i}>{d}</option>)}</select><button className="btn" onClick={() => save({ allowance_amount: num(al) })}>ثبت</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">🐷 هدف‌های پس‌انداز</h2>{w.data?.goals.length === 0 && <Empty>هدفی نیست.</Empty>}
+      {w.data?.goals.map((x: any) => <div key={x.id} className="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-0"><span>{x.icon} {x.title} — {money(x.saved)} از {money(x.target_amount)}</span><button aria-label="حذف" onClick={() => confirm('حذف شود؟ پول جمع‌شده به پول‌توجیبی برمی‌گردد.') && act(async () => { await api(`/savings-goals/${x.id}`, { method: 'DELETE' }); await w.reload(); })}>🗑</button></div>)}
+      <div className="flex gap-2 mt-2 flex-wrap"><input className="input !w-16 text-center" value={g.icon} onChange={(e) => setG({ ...g, icon: e.target.value })} aria-label="آیکون" /><input className="input flex-1" placeholder="هدف (مثلاً دوچرخه)" value={g.title} onChange={(e) => setG({ ...g, title: e.target.value })} /><input className="input !w-32" inputMode="numeric" dir="ltr" placeholder="مبلغ هدف" value={g.target} onChange={(e) => setG({ ...g, target: e.target.value })} />
+        <button className="btn btn-teal" disabled={!g.title.trim() || !num(g.target)} onClick={() => act(async () => { await api(`/children/${kid.id}/goals`, { body: { title: g.title, icon: g.icon, target_amount: num(g.target) } }); setG({ ...g, title: '', target: '' }); await w.reload(); }, 'هدف اضافه شد')}>＋</button></div></section>
+    <section className="card"><h2 className="font-bold mb-2">📚 پیشرفت درس‌های سواد مالی</h2><p>{(lessons.data ?? []).filter((l) => l.done).length} از {lessons.data?.length ?? 0} درس انجام شده.</p></section>
+    <section className="card"><h2 className="font-bold mb-2">آخرین حساب‌ها</h2>{w.data?.ledger.slice(0, 10).map((l: any, i: number) => <div key={i} className="flex justify-between text-sm py-0.5"><span>{l.reason} <span className="text-slate-400">{fmtDate(String(l.at).slice(0, 10), false)}</span></span><span className={l.delta > 0 ? 'text-green-700' : 'text-red-600'}>{l.delta > 0 ? '+' : ''}{money(l.delta)}</span></div>)}</section></div>;
 }

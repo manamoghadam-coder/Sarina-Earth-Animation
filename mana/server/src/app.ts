@@ -15,6 +15,8 @@ import photoRoutes from './routes/photos.ts';
 import notificationRoutes from './routes/notifications.ts';
 import aiRoutes from './routes/ai.ts';
 import kidsRoutes from './routes/kids.ts';
+import learnRoutes from './routes/learn.ts';
+import libraryRoutes from './routes/library.ts';
 
 export async function buildApp() {
   const app = Fastify({ logger: config.prod ? { level: 'info' } : { level: 'warn' }, bodyLimit: 1_000_000, trustProxy: config.prod });
@@ -30,7 +32,7 @@ export async function buildApp() {
     req.log.error(err); return reply.code(500).send({ error: 'server_error' });
   });
   app.get('/api/health', async () => ({ ok: true }));
-  for (const r of [authRoutes, parentRoutes, familyRoutes, photoRoutes, notificationRoutes, aiRoutes, kidsRoutes]) await app.register(r);
+  for (const r of [authRoutes, parentRoutes, familyRoutes, photoRoutes, notificationRoutes, aiRoutes, kidsRoutes, learnRoutes, libraryRoutes]) await app.register(r);
 
   const dist = path.resolve(import.meta.dirname, '../../web/dist');
   if (fs.existsSync(dist)) {

@@ -7,6 +7,7 @@ import { ttsStatus } from '../voice';
 import { AssistantSheet } from './Assistant';
 import { Gallery, Home, StarsPage, StoriesPage, TodayPage, WeekPage } from './ChildPages';
 import { HabitsPage, RequestsPage, SuggestPage } from './ChildMore';
+import { FactsPage, MoneyHub } from './ChildLearn';
 import { ReadAloudBar, ReadProvider } from './ReadAloud';
 
 export default function ChildApp() {
@@ -25,7 +26,7 @@ export default function ChildApp() {
         {ttsStatus() === 'none' && <div role="alert" className="kid-card !bg-amber-100 text-sm">⚠️ این مرورگر صدا ندارد (خواندن متن پشتیبانی نمی‌شود). از Chrome استفاده کنید.</div>}
         <ReadAloudBar />
         <Routes><Route path="/" element={<Home />} /><Route path="/today" element={<TodayPage />} /><Route path="/homework" element={<TodayPage onlyKinds={['homework', 'writing', 'study']} title="تکالیف من" />} /><Route path="/week" element={<WeekPage />} />
-          <Route path="/stars" element={<StarsPage />} /><Route path="/gallery" element={<Gallery />} /><Route path="/habits" element={<HabitsPage />} /><Route path="/requests" element={<RequestsPage />} /><Route path="/suggest" element={<SuggestPage />} /><Route path="/stories" element={<StoriesPage />} /></Routes></main>
+          <Route path="/stars" element={<StarsPage />} /><Route path="/gallery" element={<Gallery />} /><Route path="/habits" element={<HabitsPage />} /><Route path="/requests" element={<RequestsPage />} /><Route path="/suggest" element={<SuggestPage />} /><Route path="/facts" element={<FactsPage />} /><Route path="/money" element={<MoneyHub />} /><Route path="/stories" element={<StoriesPage />} /></Routes></main>
       {/* fixed, always-visible assistant button */}
       <button onClick={() => setOpen(true)} aria-label="دستیار من" className="fixed z-[70] bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 mx-auto max-w-md rounded-full bg-[var(--k1)] text-white text-2xl font-extrabold py-5 shadow-[0_8px_0_rgba(0,0,0,.2)] active:translate-y-1">دستیار من 🎙️</button>
       {open && <AssistantSheet onClose={() => setOpen(false)} />}

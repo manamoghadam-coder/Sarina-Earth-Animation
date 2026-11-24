@@ -231,3 +231,86 @@ test('member: finance and debts are separate permissions', async () => {
   assert.equal((await call('t_dad', 'GET', '/api/debts')).statusCode, 200);
   assert.equal((await call('t_dad', 'GET', '/api/transactions')).statusCode, 403);
 });
+
+test('facts, lessons (answer never leaked; stars once), wallet & savings jar (child cannot mint money)', async () => {
+  await sys(`UPDATE users SET age_group='teen' WHERE id=$1`, [ids.t_sa]);
+  const f = JSON.parse((await call('t_sa', 'GET', '/api/facts/today')).body); assert.ok(f.today?.body); assert.equal(f.recent.length, 6);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/facts/today')).body).today.id, f.today.id);          // stable all day
+  const list = JSON.parse((await call('t_sa', 'GET', '/api/child/lessons')).body); assert.ok(list.length >= 8);
+  const les = JSON.parse((await call('t_sa', 'GET', `/api/child/lessons/${list[0].id}`)).body);
+  assert.equal('correct' in les, false); assert.ok(les.options.length >= 2);
+  const real = (await sys(`SELECT correct FROM lessons WHERE id=$1`, [list[0].id]))[0].correct;
+  const wrong = les.options.find((o: any) => o.i !== real).i;
+  assert.equal(JSON.parse((await call('t_sa', 'POST', `/api/child/lessons/${list[0].id}/answer`, { i: wrong })).body).correct, false);
+  const ok1 = JSON.parse((await call('t_sa', 'POST', `/api/child/lessons/${list[0].id}/answer`, { i: real })).body); assert.equal(ok1.correct, true); assert.ok(ok1.stars_awarded > 0);
+  assert.equal(JSON.parse((await call('t_sa', 'POST', `/api/child/lessons/${list[0].id}/answer`, { i: real })).body).stars_awarded, 0);   // no double stars
+  // wallet
+  assert.equal((await call('t_sa', 'POST', `/api/children/${ids.t_sa}/wallet`, { delta: 1000, reason: 'cheat' })).statusCode, 403);
+  await assert.rejects(withActor({ id: ids.t_sa, role: 'child' }, (q) => q(`INSERT INTO wallet_ledger (child_id,delta,reason) VALUES ($1,99999,'x')`, [ids.t_sa])));
+  assert.equal((await call('t_mom', 'POST', `/api/children/${ids.t_sa}/wallet`, { delta: 50000, reason: 'عیدی' })).statusCode, 200);
+  const g = JSON.parse((await call('t_mom', 'POST', `/api/children/${ids.t_sa}/goals`, { title: 'دوچرخه', target_amount: 200000 })).body);
+  assert.equal((await call('t_sa', 'POST', '/api/child/wallet/save', { goal_id: g.id, amount: 60000 })).statusCode, 409);            // more than balance
+  assert.equal((await call('t_sa', 'POST', '/api/child/wallet/save', { goal_id: g.id, amount: 20000 })).statusCode, 200);
+  assert.equal((await call('t_sm', 'POST', '/api/child/wallet/save', { goal_id: g.id, amount: 1 })).statusCode, 404);               // sibling's jar
+  assert.equal((await call('t_sa', 'POST', '/api/child/wallet/spend', { amount: 5000, note: 'بستنی' })).statusCode, 200);
+  const w = JSON.parse((await call('t_sa', 'GET', '/api/child/wallet')).body); assert.equal(w.balance, 25000); assert.equal(Number(w.goals[0].saved), 20000);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/child/wallet')).body).goals.length, 0);
+  await call('t_mom', 'DELETE', `/api/savings-goals/${g.id}`);                                                                      // refund jar
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/child/wallet')).body).balance, 45000);
+  // weekly allowance is idempotent
+  await call('t_mom', 'PATCH', `/api/children/${ids.t_sa}/settings`, { allowance_amount: 10000, allowance_weekday: persianWeekday(todayISO()) });
+  await generate(tehranInstant(todayISO(), '09:00')); await generate(tehranInstant(todayISO(), '09:05'));
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/child/wallet')).body).balance, 55000);
+});
+
+function multipart(fields: Record<string, string>, filename: string, content: Buffer) {
+  const b = 'xLIBx'; const parts: Buffer[] = [];
+  for (const [k, v] of Object.entries(fields)) parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+  parts.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`), content, Buffer.from(`\r\n--${b}--\r\n`));
+  return { payload: Buffer.concat(parts), 'content-type': `multipart/form-data; boundary=${b}` };
+}
+const upload = (u: string, url: string, fields: Record<string, string>, filename: string, content: Buffer) => { const m = multipart(fields, filename, content); return app.inject({ method: 'POST', url, headers: { ...H, cookie: jar[u], 'content-type': m['content-type'] }, payload: m.payload }); };
+
+test('library: PDF/audio upload by magic bytes, audience filter, Range streaming, permissions', async () => {
+  const pdf = Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(2000, 65)]); const mp3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(4000, 1)]);
+  assert.equal((await upload('t_sa', '/api/library', { title: 'x' }, 'a.pdf', pdf)).statusCode, 403);                      // child cannot upload
+  assert.equal((await upload('t_mom', '/api/library', { title: 'evil' }, 'a.pdf', Buffer.from('MZ\x90\x00 not a pdf'))).statusCode, 415);   // disguised file
+  const a = await upload('t_mom', '/api/library', { title: 'قصه‌ی شب', category: 'story', audience: 'young' }, 'x.mp3', mp3); assert.equal(a.statusCode, 201, a.body);
+  const b = await upload('t_mom', '/api/library', { title: 'کتاب نوجوان', category: 'book', audience: 'teen' }, 'y.pdf', pdf); assert.equal(b.statusCode, 201);
+  const c = await upload('t_mom', '/api/library', { title: 'فقط بزرگ‌ترها', audience: 'adults' }, 'z.pdf', pdf); assert.equal(c.statusCode, 201);
+  const [idA, idB, idC] = [a, b, c].map((r) => JSON.parse(r.body).id);
+  await sys(`UPDATE users SET age_group='young' WHERE id=$1`, [ids.t_sm]); await sys(`UPDATE users SET age_group='teen' WHERE id=$1`, [ids.t_sa]);
+  const kidSm = JSON.parse((await call('t_sm', 'GET', '/api/library')).body).map((x: any) => x.title);
+  assert.ok(kidSm.includes('قصه‌ی شب') && !kidSm.includes('کتاب نوجوان') && !kidSm.includes('فقط بزرگ‌ترها'));
+  assert.equal((await call('t_sm', 'GET', `/api/library/${idB}/file`)).statusCode, 404);                                   // other age group's file
+  assert.equal((await call('t_sa', 'GET', `/api/library/${idC}/file`)).statusCode, 404);
+  const full = await call('t_sm', 'GET', `/api/library/${idA}/file`); assert.equal(full.statusCode, 200); assert.equal(full.headers['content-type'], 'audio/mpeg');
+  const part = await app.inject({ method: 'GET', url: `/api/library/${idA}/file`, headers: { ...H, cookie: jar.t_sm, range: 'bytes=10-19' } });
+  assert.equal(part.statusCode, 206); assert.equal(part.headers['content-range'], 'bytes 10-19/4003'); assert.equal(part.rawPayload.length, 10);
+  assert.equal((await call('t_dad', 'GET', '/api/library')).statusCode === 200 ? JSON.parse((await call('t_dad', 'GET', '/api/library')).body).length : 0, 0);   // member without "library" sees nothing
+  await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]); await signIn('t_dad');
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { library: 1 } });
+  assert.equal(JSON.parse((await call('t_dad', 'GET', '/api/library')).body).length, 3);
+  assert.equal((await call('t_dad', 'DELETE', `/api/library/${idA}`)).statusCode, 403);
+  for (const id of [idA, idB, idC]) assert.equal((await call('t_mom', 'DELETE', `/api/library/${id}`)).statusCode, 200);
+});
+test('recipes: categories, photo + video upload, family read, member needs permission', async () => {
+  const cats = JSON.parse((await call('t_mom', 'GET', '/api/recipe-categories')).body); assert.ok(cats.length >= 8 && cats.some((c: any) => c.name === 'دسر'));
+  const r = await call('t_mom', 'POST', '/api/recipes', { category_id: cats[0].id, title: 'قورمه‌سبزی-تست', ingredients: 'سبزی\nلوبیا', steps: '۱. سرخ کنید', minutes: 90, servings: 4, video_url: 'https://example.com/v' }); assert.equal(r.statusCode, 201, r.body);
+  const id = JSON.parse(r.body).id;
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.alloc(3000, 2)]);
+  assert.equal((await upload('t_mom', `/api/recipes/${id}/media`, {}, 'a.png', png)).statusCode, 201);
+  const v = await upload('t_mom', `/api/recipes/${id}/media`, {}, 'a.mp4', mp4); assert.equal(v.statusCode, 201); const vid = JSON.parse(v.body).id;
+  assert.equal((await upload('t_mom', `/api/recipes/${id}/media`, {}, 'a.exe', Buffer.from('MZ....'))).statusCode, 415);
+  const det = JSON.parse((await call('t_sm', 'GET', `/api/recipes/${id}`)).body); assert.equal(det.media.length, 2); assert.equal(det.title, 'قورمه‌سبزی-تست');   // children can read
+  assert.equal((await call('t_sm', 'GET', `/api/recipe-media/${vid}/file`)).headers['content-type'], 'video/mp4');
+  assert.equal((await call('t_sm', 'POST', '/api/recipes', { title: 'x' })).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { recipes: 0 } });
+  assert.equal(JSON.parse((await call('t_dad', 'GET', '/api/recipes')).body).length, 0);                                            // member w/o permission: RLS hides
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { recipes: 2 } });
+  assert.equal((await call('t_dad', 'POST', '/api/recipes', { title: 'dad-recipe' })).statusCode, 201);
+  assert.equal((await call('t_mom', 'DELETE', `/api/recipes/${id}`)).statusCode, 200);
+  await sys(`DELETE FROM recipes WHERE title='dad-recipe'`);
+  assert.equal((await sys(`SELECT count(*)::int n FROM recipe_media WHERE recipe_id=$1`, [id]))[0].n, 0);
+});

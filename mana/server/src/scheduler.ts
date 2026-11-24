@@ -34,6 +34,11 @@ export async function generate(now = new Date()) {
         await enqueue({ user_id: k.id, kind: 'activity', title: a.title, body: text, icon: a.icon, due, key: `act:${a.id}:${today}:${off}`, ref_type: 'activity', ref_id: a.id, ref_day: today });
       }
     }
+    // weekly pocket money (idempotent via ref_key)
+    if (k.allowance_amount > 0 && k.allowance_weekday === wd && nowP.minutes >= 8 * 60) {
+      const ins = await sys(`INSERT INTO wallet_ledger (child_id, delta, reason, ref_key) VALUES ($1,$2,'پول‌توجیبی هفتگی',$3) ON CONFLICT (ref_key) DO NOTHING RETURNING id`, [k.id, k.allowance_amount, `allow:${k.id}:${today}`]);
+      if (ins.length) await enqueue({ user_id: k.id, kind: 'allowance', title: 'پول‌توجیبی', body: `${k.display_name} جان، پول‌توجیبی این هفته‌ات اضافه شد: ${fmtMoney(k.allowance_amount)} تومان 💰`, icon: '💰', due: now, key: `allowance:${k.id}:${today}` });
+    }
     // habits & medicine reminders (medicine ignores quiet hours; unreported doses get one nudge after 15 min)
     const routines = await sys(`SELECT * FROM routines WHERE child_id=$1 AND active AND notify AND cardinality(times) > 0 AND (weekdays IS NULL OR $2 = ANY(weekdays))
       AND (start_date IS NULL OR start_date <= $3) AND (end_date IS NULL OR end_date >= $3)`, [k.id, wd, today]);

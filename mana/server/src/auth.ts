@@ -58,7 +58,7 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
   if (req.actor!.role !== 'parent') return reply.code(403).send({ error: 'forbidden' });
 }
 
-export const MODULES = ['tasks', 'events', 'finance', 'debts', 'goals', 'children', 'photos'] as const;
+export const MODULES = ['tasks', 'events', 'finance', 'debts', 'goals', 'children', 'photos', 'library', 'recipes'] as const;
 export const level = (a: Actor, m: string) => (a.role === 'parent' ? 2 : a.role === 'member' ? Math.min(2, Math.max(0, Number(a.perms?.[m] ?? 0))) : 0);
 /** API-level gate (the database enforces the same rule through RLS). need: 1=read, 2=write. */
 export const requirePerm = (m: (typeof MODULES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {

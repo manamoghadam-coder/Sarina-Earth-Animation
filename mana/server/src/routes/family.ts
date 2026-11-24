@@ -24,7 +24,7 @@ export default async function familyRoutes(app: FastifyInstance) {
   app.patch('/api/children/:id/settings', { preHandler: requirePerm('children', 2) }, async (req) => {
     const id = zId.parse((req.params as any).id);
     const d = z.object({ notifications_enabled: z.boolean(), voice_notifications: z.boolean(), read_aloud_default: z.boolean(), quiet_start: zTime, quiet_end: zTime,
-      reminder_offsets: z.array(z.number().int().min(-240).max(240)).max(5), mic_allowed: z.boolean(), weekly_goal_stars: z.number().int().min(0).max(1000) }).partial().strict().parse(req.body);
+      reminder_offsets: z.array(z.number().int().min(-240).max(240)).max(5), mic_allowed: z.boolean(), weekly_goal_stars: z.number().int().min(0).max(1000), allowance_amount: z.number().int().min(0).max(1e9), allowance_weekday: z.number().int().min(0).max(6), ai_enabled: z.boolean(), ai_daily_limit: z.number().int().min(0).max(200) }).partial().strict().parse(req.body);
     const keys = Object.keys(d); if (!keys.length) return { ok: true };
     return withActor(req.actor!, async (q) => (await q(`UPDATE child_settings SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE child_id=$1 RETURNING *`, [id, ...keys.map((k) => (d as any)[k])]))[0]);
   });

@@ -1,4 +1,5 @@
 // Persian voice layer. TTS = speechSynthesis; STT = SpeechRecognition (Chrome/Android). Nothing is recorded or stored by MANA.
+import { splitLang } from './langsplit';
 type Listener = () => void;
 const rateKey = 'mana.voice.rate';
 export const getRate = () => { try { return Number(localStorage.getItem(rateKey)) || 0.85; } catch { return 0.85; } };
@@ -11,22 +12,30 @@ let voicesCache: SpeechSynthesisVoice[] = [];
 const loadVoices = () => { if (ttsSupported()) voicesCache = speechSynthesis.getVoices(); };
 if (ttsSupported()) { loadVoices(); speechSynthesis.addEventListener?.('voiceschanged', loadVoices); }
 export const persianVoice = () => voicesCache.find((v) => /^fa/i.test(v.lang)) ?? null;
+export const englishVoice = () => voicesCache.find((v) => /^en[-_]US/i.test(v.lang)) ?? voicesCache.find((v) => /^en/i.test(v.lang)) ?? null;
 /** 'ok' = a Persian voice exists; 'maybe' = engine exists but no Persian voice is listed (Android may still voice it); 'none' = no TTS. */
 export const ttsStatus = (): 'ok' | 'maybe' | 'none' => (!ttsSupported() ? 'none' : persianVoice() ? 'ok' : 'maybe');
 
 let current: SpeechSynthesisUtterance | null = null;
-/** Speaks Persian text. Resolves when finished (or cancelled). Cancels anything already speaking. */
+/** Speaks Persian text; English words/sentences inside it are spoken with an English voice. Resolves when finished (or cancelled). */
 export function speak(text: string, opts: { rate?: number; cancel?: boolean; source?: 'readaloud' } = {}): Promise<void> {
   if (!ttsSupported() || !text.trim()) return Promise.resolve();
   if (opts.source !== 'readaloud') window.dispatchEvent(new Event('mana-user-speak'));   // read-aloud yields to any other speech
+  const clean = text.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' ');   // emojis are not spoken
+  const runs = splitLang(clean);
+  if (!runs.length) return Promise.resolve();
+  if (opts.cancel !== false) speechSynthesis.cancel();
   return new Promise((resolve) => {
-    if (opts.cancel !== false) speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ' '));  // emojis are not spoken
-    u.lang = 'fa-IR'; u.rate = opts.rate ?? getRate(); u.pitch = 1.05;
-    const v = persianVoice(); if (v) u.voice = v;
-    u.onend = () => resolve();
-    u.onerror = (ev) => { if (ev.error !== 'canceled' && ev.error !== 'interrupted') window.dispatchEvent(new CustomEvent('mana-voice-error', { detail: ev.error })); resolve(); };
-    current = u; speechSynthesis.speak(u);
+    let left = runs.length;
+    const done = () => { if (--left <= 0) resolve(); };
+    for (const r of runs) {
+      const u = new SpeechSynthesisUtterance(r.text);
+      u.lang = r.lang; u.rate = r.lang === 'en-US' ? Math.min(0.9, opts.rate ?? getRate()) : (opts.rate ?? getRate()); u.pitch = 1.05;
+      const v = r.lang === 'en-US' ? englishVoice() : persianVoice(); if (v) u.voice = v;
+      u.onend = done;
+      u.onerror = (ev) => { if (ev.error !== 'canceled' && ev.error !== 'interrupted') window.dispatchEvent(new CustomEvent('mana-voice-error', { detail: ev.error })); done(); };
+      current = u; speechSynthesis.speak(u);
+    }
   });
 }
 export const stopSpeaking = () => { if (ttsSupported()) speechSynthesis.cancel(); current = null; };
