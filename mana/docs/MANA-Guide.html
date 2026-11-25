@@ -37,22 +37,22 @@ table{border-collapse:collapse;width:100%;margin:8px 0;break-inside:avoid} th,td
 <div class="warn"><b>رمزهای اولیه:</b> فایل جداگانه‌ی <code>accounts.env</code> رمزهایی را که تعیین کردید دارد. آن را کنار <code>start-local.bat</code> (پوشه‌ی deploy) بگذارید؛ در PDF و Git رمزی نوشته نشده است. رمزهای چهاررقمی (وحید، سارینا، سامان) کوتاه‌اند؛ سامانه با قفل پیشرونده (۱۰ دقیقه، ۲۰، ۴۰ … تا ۲۴ ساعت) از حدس‌زدن محافظت می‌کند ولی روی سرور اینترنتی رمز بلندتر، به‌ویژه برای وحید، توصیه می‌شود.</div>
 <h2>۲. گرفتن فایل‌های پروژه</h2>
 <h3>راه الف — فایل ZIP</h3>
-<ol><li>فایل <code>MANA-v4.zip</code> را در <code>D:\Claude Project</code> بگذارید.</li><li>راست‌کلیک ← <b>Extract All</b>. پوشه‌ی <code>MANA</code> ساخته می‌شود.</li></ol>
+<ol><li>فایل <code>OurLittleWorld-v5.zip</code> را در <code>D:\Claude Project</code> بگذارید.</li><li>راست‌کلیک ← <b>Extract All</b>. پوشه‌ی <code>OurLittleWorld</code> ساخته می‌شود.</li></ol>
 <h3>راه ب — GitHub (اگر زیپ باز نشد)</h3>
 <pre>git clone -b ccr-e1b3dc84-iv05g9 https://github.com/manamoghadam-coder/Sarina-Earth-Animation.git "D:\Claude Project\repo"</pre>
 <p>پروژه داخل پوشه‌ی <code>mana</code> است. یا در GitHub شاخه را انتخاب کنید و Code ← Download ZIP بزنید.</p>
 
 <h2>۳. اجرای کامل روی لپ‌تاپ</h2>
-<p>مرورگر آدرس <code>http://localhost:8080</code> را «امن» می‌داند؛ پس نصب PWA، میکروفون و اعلان درون‌برنامه‌ای روی خود لپ‌تاپ قابل آزمایش است.</p>
+<p>مرورگر آدرس <code>http://localhost:8090</code> را «امن» می‌داند؛ پس نصب PWA، میکروفون و اعلان درون‌برنامه‌ای روی خود لپ‌تاپ قابل آزمایش است.</p>
 <ol>
 <li>نصب <b>Docker Desktop</b> از docker.com. بعد از نصب یک‌بار ویندوز را ریستارت کنید و صبر کنید آیکون Docker «Running» شود (اگر خواست، WSL 2 را فعال کنید).</li>
-<li>پوشه‌ی <code>D:\Claude Project\MANA\deploy</code> را باز کنید.</li>
+<li>پوشه‌ی <code>D:\Claude Project\OurLittleWorld\deploy</code> را باز کنید.</li>
 <li>روی <b>start-local.bat</b> دوبار کلیک کنید. بار اول چند دقیقه طول می‌کشد (ساخت برنامه و پایگاه داده).</li>
 <li>در پایان، رمز حساب‌ها چاپ می‌شود. <b>همان‌جا یادداشت کنید</b>؛ فقط یک‌بار نشان داده می‌شود.</li>
-<li>مرورگر <code>http://localhost:8080</code> را باز می‌کند. با <code>mana</code> وارد شوید.</li></ol>
+<li>مرورگر <code>http://localhost:8090</code> را باز می‌کند. با <code>mana</code> وارد شوید.</li></ol>
 <div class="note">برای آزمون حساب بچه‌ها از یک پنجره‌ی Incognito یا مرورگر دوم استفاده کنید تا نشست مانا نپرد.</div>
 <h3>روشن/خاموش کردن</h3>
-<pre>cd "D:\Claude Project\MANA\deploy"
+<pre>cd "D:\Claude Project\OurLittleWorld\deploy"
 docker compose -f docker-compose.local.yml down        # خاموش (داده‌ها می‌مانند)
 docker compose -f docker-compose.local.yml up -d       # روشن دوباره
 docker compose -f docker-compose.local.yml logs -f mana  # مشاهده‌ی لاگ</pre>

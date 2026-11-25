@@ -35,7 +35,7 @@ export async function buildApp() {
     if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.code ?? 'bad_request' });
     req.log.error(err); return reply.code(500).send({ error: 'server_error' });
   });
-  app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/health', async () => ({ ok: true, version: '5' }));
   for (const r of [authRoutes, parentRoutes, familyRoutes, photoRoutes, notificationRoutes, aiRoutes, kidsRoutes, learnRoutes, libraryRoutes, kidAiRoutes, adminRoutes, messengerRoutes, extraRoutes]) await app.register(r);
 
   const dist = path.resolve(import.meta.dirname, '../../web/dist');

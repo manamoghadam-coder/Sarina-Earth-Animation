@@ -1,5 +1,6 @@
 # اجرای آزمایشی روی لپ‌تاپ (بدون HTTPS و بدون دامنه). فقط برای خودتان روی localhost؛ رمزهای زیر محلی‌اند و برای سرور واقعی استفاده نشوند.
 # UNTESTED in the build environment (no Docker there).
+name: ourlittleworld   # project name differs from older 'deploy' runs, so old containers/volumes are never reused
 services:
   db:
     image: postgres:16
@@ -12,7 +13,7 @@ services:
     env_file:
       - path: accounts.env      # رمزهای اولیه‌ی حساب‌ها (اختیاری؛ در git نیست)
         required: false
-    ports: [ "127.0.0.1:8080:8080" ]      # فقط از همین لپ‌تاپ قابل دسترسی
+    ports: [ "127.0.0.1:8090:8080" ]      # فقط از همین لپ‌تاپ قابل دسترسی
     volumes: [ "photos:/app/server/storage" ]
     environment:
       NODE_ENV: development

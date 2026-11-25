@@ -14,7 +14,7 @@ function Login() {
       <label className="label" htmlFor="p">رمز عبور</label><input id="p" className="input mb-3" dir="ltr" type="password" autoComplete="current-password" value={p} onChange={(e) => setP(e.target.value)} required />
       {need2fa && <><label className="label" htmlFor="c">کد تأیید دومرحله‌ای (۶ رقم)</label><input id="c" className="input mb-3" dir="ltr" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} autoFocus /></>}
       {err && <p role="alert" className="text-red-600 text-sm mb-3">{err}</p>}
-      <button className="btn btn-teal w-full" disabled={busy}>{busy ? 'در حال ورود…' : 'ورود'}</button></form></main>;
+      <button className="btn btn-teal w-full" disabled={busy}>{busy ? 'در حال ورود…' : 'ورود'}</button><p className="text-center text-xs text-slate-400 mt-4">نسخه ۵</p></form></main>;
 }
 export default function App() {
   const { me, loading } = useAuth();
