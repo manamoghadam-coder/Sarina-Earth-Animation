@@ -1,13 +1,12 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
-echo نسخه ۵ - دنیای کوچک ما
+echo نسخه ۶ - دنیای کوچک ما
 echo [1/4] خاموش کردن نسخه‌ی قدیمی (اگر روشن باشد)...
 docker compose -p deploy down >nul 2>&1
 echo [1/4] ساخت و اجرای برنامه (بار اول چند دقیقه طول می‌کشد)...
 docker compose -f docker-compose.local.yml up -d --build
 if errorlevel 1 ( echo خطا! Docker Desktop باز و در حال اجرا باشد. & pause & exit /b 1 )
-if not exist accounts.env echo هشدار: فایل accounts.env کنار این فایل نیست؛ رمزهای تصادفی ساخته می‌شود.
 echo [2/4] منتظر آماده شدن سرور...
 set /a tries=0
 :wait
@@ -24,10 +23,10 @@ docker compose -f docker-compose.local.yml logs mana --tail 40
 pause
 exit /b 1
 :ready
-echo [3/4] ساخت حساب‌های آزمایشی (رمزها را یادداشت کنید)...
-docker compose -f docker-compose.local.yml exec mana npx tsx scripts/seed.ts
+echo [3/4] آماده است. در اولین ورود، برنامه از شما نام کاربری و رمز مدیر را می‌پرسد.
 echo [4/4] باز شدن برنامه در مرورگر...
 start http://localhost:8090
 echo.
+echo اگر نام کاربری یا رمز مدیر را فراموش کردید: reset-password.bat را اجرا کنید.
 echo برای خاموش کردن: docker compose -f docker-compose.local.yml down
 pause

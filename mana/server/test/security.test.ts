@@ -461,3 +461,31 @@ test('shopping list, health reminders and task attachments obey permissions', as
   const dl = await call('t_mom', 'GET', `/api/task-files/${JSON.parse(b.body).id}/file`); assert.match(String(dl.headers['content-disposition']), /attachment/);
   assert.equal((await call('t_mom', 'DELETE', `/api/tasks/${t.id}`)).statusCode, 200); assert.equal((await sys(`SELECT count(*)::int n FROM task_files WHERE task_id=$1`, [t.id]))[0].n, 0);
 });
+
+test('first-run setup is refused when users exist; creation works on an empty DB (rolled back); admin manages accounts and passwords', async () => {
+  assert.equal(JSON.parse((await app.inject({ url: '/api/setup/status' })).body).needs_setup, false);
+  const r = await app.inject({ method: 'POST', url: '/api/setup', headers: H, payload: { username: 'hacker', display_name: 'x', password: 'longpassword1' } }); assert.equal(r.statusCode, 409);
+  assert.equal((await app.inject({ method: 'POST', url: '/api/setup', payload: { username: 'hacker', display_name: 'x', password: 'longpassword1' } })).statusCode, 403);   // CSRF header required
+  // creation path: run inside a transaction on an emptied users table, then roll back
+  const { createFirstAdmin } = await import('../src/routes/setup.ts'); const c = await sysPool.connect();
+  try { await c.query('BEGIN'); await c.query('TRUNCATE users CASCADE'); const id = await createFirstAdmin(c, { username: 'first_admin', display_name: 'مدیر', password: 'longpassword1' }); assert.ok(id);
+    assert.equal(await createFirstAdmin(c, { username: 'second', display_name: 'x', password: 'longpassword1' }), null);   // a second call is refused
+    assert.equal(Number((await c.query(`SELECT count(*) n FROM users WHERE role='parent'`)).rows[0].n), 1); } finally { await c.query('ROLLBACK'); c.release(); }
+  // admin account management
+  const mkU = JSON.parse((await call('t_mom', 'POST', '/api/users', { username: 't_adm2', display_name: 'مدیر دوم', role: 'parent', password: 'longpassword1' })).body); assert.equal(mkU.role, 'parent');
+  assert.equal((await call('t_mom', 'POST', '/api/users', { username: 't_adm3', display_name: 'x', role: 'parent', password: '1234' })).statusCode, 400);   // admins need 8+
+  assert.equal((await call('t_mom', 'PATCH', `/api/users/${ids.t_sa}`, { username: 't_sa_renamed' })).statusCode, 200);
+  assert.equal((await call('t_mom', 'PATCH', `/api/users/${ids.t_sa}`, { username: 't_sm' })).statusCode, 400);                                  // duplicate username
+  assert.equal((await call('t_dad', 'POST', `/api/users/${ids.t_sa}/password`, { password: '9999' })).statusCode, 403);
+  assert.equal((await call('t_mom', 'POST', `/api/users/${ids.t_sa}/password`, { password: '2468' })).statusCode, 200);
+  assert.equal((await call('t_sa', 'GET', '/api/me')).statusCode, 401);                                                                           // old session closed
+  assert.equal((await app.inject({ method: 'POST', url: '/api/auth/login', headers: H, payload: { username: 't_sa_renamed', password: '2468' } })).statusCode, 200);   // new username + new PIN work
+  assert.equal((await call('t_mom', 'POST', `/api/users/${mkU.id}/password`, { password: '1234' })).statusCode, 400);                              // admin password too short
+  assert.equal((await call('t_mom', 'POST', `/api/users/${ids.t_mom}/password`, { password: 'longpassword2' })).statusCode, 400);                 // own password: use change-password
+  await sys(`UPDATE users SET username='t_sa' WHERE id=$1`, [ids.t_sa]); await sys(`DELETE FROM users WHERE username='t_adm2'`);
+  // never deactivate the last active admin
+  const parents = await sys(`SELECT id FROM users WHERE role='parent' AND active AND username NOT LIKE 't\\_%'`);
+  const others = parents.map((p: any) => p.id); await sys(`UPDATE users SET active=false WHERE id = ANY($1)`, [others]);
+  const tgt = await mk('t_adm4', 'parent').then(() => ids.t_adm4); assert.equal((await call('t_mom', 'PATCH', `/api/users/${tgt}`, { active: false })).statusCode, 200);   // t_mom is still active
+  await sys(`UPDATE users SET active=true WHERE id = ANY($1)`, [others]); await sys(`DELETE FROM users WHERE username='t_adm4'`);
+});

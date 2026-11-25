@@ -12,8 +12,9 @@ export default async function adminRoutes(app: FastifyInstance) {
   // ----- accounts (Mana only) -----
   app.get('/api/users', { preHandler: requireParent }, async (req) => withActor(req.actor!, (q) => q(`SELECT id, username, display_name, role, age_group, active FROM users ORDER BY role, display_name`)));
   app.post('/api/users', { preHandler: requireParent }, async (req, reply) => {
-    const b = z.object({ username: z.string().regex(/^[a-z0-9_]{3,32}$/), display_name: zText(40), role: z.enum(['member', 'child']), age_group: z.enum(['young', 'teen', 'adult']).optional(), password: z.string().min(4).max(100) }).strict().parse(req.body);
-    const age = b.role === 'member' ? 'adult' : (b.age_group === 'adult' || !b.age_group ? 'teen' : b.age_group);
+    const b = z.object({ username: z.string().regex(/^[a-z0-9_]{3,32}$/), display_name: zText(40), role: z.enum(['parent', 'member', 'child']), age_group: z.enum(['young', 'teen', 'adult']).optional(), password: z.string().min(4).max(100) }).strict().parse(req.body);
+    if (b.role === 'parent' && b.password.length < 8) return reply.code(400).send({ error: 'validation', message: 'رمز مدیر حداقل ۸ نویسه باشد.' });
+    const age = b.role !== 'child' ? 'adult' : (b.age_group === 'adult' || !b.age_group ? 'teen' : b.age_group);
     const hash = await hashPassword(b.password);
     const row = await withActor(req.actor!, async (q) => {
       const [u] = await q(`INSERT INTO users (username, display_name, role, password_hash, age_group, permissions) VALUES ($1,$2,$3,$4,$5,'{}') RETURNING id, username, display_name, role, age_group`, [b.username, b.display_name, b.role, hash, age]);
@@ -24,11 +25,23 @@ export default async function adminRoutes(app: FastifyInstance) {
     return reply.code(201).send(row);
   });
   app.patch('/api/users/:id', { preHandler: requireParent }, async (req, reply) => {
-    const id = zId.parse((req.params as any).id); const b = z.object({ display_name: zText(40), active: z.boolean(), age_group: z.enum(['young', 'teen', 'adult']) }).partial().strict().parse(req.body);
+    const id = zId.parse((req.params as any).id); const b = z.object({ username: z.string().regex(/^[a-z0-9_]{3,32}$/), display_name: zText(40), active: z.boolean(), age_group: z.enum(['young', 'teen', 'adult']) }).partial().strict().parse(req.body);
     if (id === req.actor!.id && b.active === false) return reply.code(409).send({ error: 'cannot_deactivate_self' });
+    if (b.active === false) { const [t] = await sys(`SELECT role FROM users WHERE id=$1`, [id]); if (t?.role === 'parent' && Number((await sys(`SELECT count(*)::int n FROM users WHERE role='parent' AND active AND id<>$1`, [id]))[0].n) === 0) return reply.code(409).send({ error: 'last_admin' }); }
     const keys = Object.keys(b); if (!keys.length) return reply.code(400).send({ error: 'empty' });
     const r = await withActor(req.actor!, (q) => q(`UPDATE users SET ${keys.map((k, i) => `${k}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING id, username, active`, [id, ...keys.map((k) => (b as any)[k])]));
     if (!r[0]) return reply.code(404).send({ error: 'not_found' }); if (b.active === false) await revokeAll(id); return r[0];
+  });
+
+  // admin resets anybody's password (children/members >= 4 chars, admins >= 8); the target is signed out and unlocked
+  app.post('/api/users/:id/password', { preHandler: requireParent }, async (req, reply) => {
+    const id = zId.parse((req.params as any).id); const { password } = z.object({ password: z.string().min(4).max(100) }).strict().parse(req.body);
+    if (id === req.actor!.id) return reply.code(400).send({ error: 'use_change_password', message: 'رمز خودتان را از «تغییر رمز عبور» عوض کنید.' });
+    const [t] = await sys(`SELECT role FROM users WHERE id=$1`, [id]); if (!t) return reply.code(404).send({ error: 'not_found' });
+    if (t.role === 'parent' && password.length < 8) return reply.code(400).send({ error: 'validation', message: 'رمز مدیر حداقل ۸ نویسه باشد.' });
+    await sys(`UPDATE users SET password_hash=$2, failed_logins=0, locked_until=NULL, totp_enabled=false, totp_secret=NULL WHERE id=$1`, [id, await hashPassword(password)]);
+    await sys(`INSERT INTO audit_log (user_id, action, detail) VALUES ($1,'password_reset',$2)`, [req.actor!.id, { target: id }]);
+    await revokeAll(id); return { ok: true };
   });
 
   // ----- backups -----

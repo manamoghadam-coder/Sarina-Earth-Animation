@@ -21,6 +21,7 @@ import kidAiRoutes from './routes/kidai.ts';
 import adminRoutes from './routes/admin.ts';
 import messengerRoutes from './routes/messenger.ts';
 import extraRoutes from './routes/extras.ts';
+import setupRoutes from './routes/setup.ts';
 
 export async function buildApp() {
   const app = Fastify({ logger: config.prod ? { level: 'info' } : { level: 'warn' }, bodyLimit: 1_000_000, trustProxy: config.prod });
@@ -35,8 +36,8 @@ export async function buildApp() {
     if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: err.code ?? 'bad_request' });
     req.log.error(err); return reply.code(500).send({ error: 'server_error' });
   });
-  app.get('/api/health', async () => ({ ok: true, version: '5' }));
-  for (const r of [authRoutes, parentRoutes, familyRoutes, photoRoutes, notificationRoutes, aiRoutes, kidsRoutes, learnRoutes, libraryRoutes, kidAiRoutes, adminRoutes, messengerRoutes, extraRoutes]) await app.register(r);
+  app.get('/api/health', async () => ({ ok: true, version: '6' }));
+  for (const r of [authRoutes, parentRoutes, familyRoutes, photoRoutes, notificationRoutes, aiRoutes, kidsRoutes, learnRoutes, libraryRoutes, kidAiRoutes, adminRoutes, messengerRoutes, extraRoutes, setupRoutes]) await app.register(r);
 
   const dist = path.resolve(import.meta.dirname, '../../web/dist');
   if (fs.existsSync(dist)) {
