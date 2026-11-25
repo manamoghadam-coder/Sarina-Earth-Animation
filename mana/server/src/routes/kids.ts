@@ -17,7 +17,7 @@ export default async function kidsRoutes(app: FastifyInstance) {
   }), 'kind, title', ['child_id'], 'children');
   crud(app, 'quotes', 'quotes', z.object({ age_group: z.enum(['young', 'teen', 'adult']), text: zText(240), active: z.boolean().optional() }), 'age_group, text', [], 'children');
   crud(app, 'occasions', 'occasions', z.object({
-    title: zText(100), kind: z.enum(['family', 'birthday', 'iranian', 'school', 'other']).optional(), jm: z.number().int().min(1).max(12), jd: z.number().int().min(1).max(31),
+    title: zText(100), kind: z.enum(['family', 'birthday', 'iranian', 'school', 'other', 'anniversary', 'holiday']).optional(), notify: z.boolean().optional(), person_id: zId.nullable().optional(), official: z.boolean().optional(), jm: z.number().int().min(1).max(12), jd: z.number().int().min(1).max(31),
     birth_jy: z.number().int().min(1300).max(1500).nullable().optional(), icon: z.string().max(8).optional(), audience: z.enum(['all', 'kids', 'adults']).optional(), active: z.boolean().optional(),
   }), 'jm, jd', [], 'events');
 

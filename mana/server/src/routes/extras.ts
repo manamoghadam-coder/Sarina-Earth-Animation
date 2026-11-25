@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { requireAdult, requirePerm } from '../auth.ts';
+import { requireAdult, requirePerm, requireUser } from '../auth.ts';
 import { sys, withActor } from '../db.ts';
 import { removeStored, saveUpload, sendStored } from '../files.ts';
 import { todayISO } from '../jalali.ts';
@@ -38,6 +38,19 @@ export default async function extraRoutes(app: FastifyInstance) {
       const cat = r.category === 'food' ? 'food' : r.category === 'school' || r.category === 'class_fee' ? 'school' : 'other';
       await q(`INSERT INTO shopping_items (title, category, note, added_by) VALUES ($1,$2,$3,$4)`, [r.title, cat, `درخواست ${r.display_name}`, req.actor!.id]);
       await q(`UPDATE purchase_requests SET status='approved', decided_at=now() WHERE id=$1 AND status='requested'`, [id]); return { ok: true };
+    });
+  });
+
+  // ----- weekly meal plan (family-wide readable; written with the "shopping" module) -----
+  app.get('/api/meals', { preHandler: requireUser }, async (req) => {
+    const { from, to } = z.object({ from: zDate, to: zDate }).parse(req.query);
+    return withActor(req.actor!, (q) => q(`SELECT m.id, m.day, m.slot, m.title, m.recipe_id FROM meals m WHERE m.day BETWEEN $1 AND $2 ORDER BY m.day`, [from, to]));
+  });
+  app.put('/api/meals', { preHandler: requirePerm('shopping', 2) }, async (req) => {
+    const d = z.object({ day: zDate, slot: z.enum(['breakfast', 'lunch', 'dinner']), title: z.string().trim().max(120), recipe_id: zId.nullish() }).strict().parse(req.body);
+    return withActor(req.actor!, async (q) => {
+      if (!d.title) { await q(`DELETE FROM meals WHERE day=$1 AND slot=$2`, [d.day, d.slot]); return { ok: true }; }
+      return (await q(`INSERT INTO meals (day, slot, title, recipe_id) VALUES ($1,$2,$3,$4) ON CONFLICT (day, slot) DO UPDATE SET title=EXCLUDED.title, recipe_id=EXCLUDED.recipe_id RETURNING id, day, slot, title, recipe_id`, [d.day, d.slot, d.title, d.recipe_id ?? null]))[0];
     });
   });
 

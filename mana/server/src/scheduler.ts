@@ -1,5 +1,5 @@
 import { sys } from './db.ts';
-import { addDays, persianWeekday, tehranInstant, tehranParts, toFaDigits, todayISO } from './jalali.ts';
+import { addDays, persianWeekday, tehranInstant, tehranParts, toFaDigits, toJalali, todayISO } from './jalali.ts';
 import { sendPush } from './push.ts';
 import { backupDue, runBackup } from './backup.ts';
 import { sendToUser } from './messenger.ts';
@@ -15,6 +15,24 @@ const hhmm = (d: Date) => { const p = tehranParts(d); return `${String(p.hour).p
 async function enqueue(n: { user_id: string; kind: string; title: string; body: string; icon: string; due: Date; key: string; ref_type?: string; ref_id?: string; ref_day?: string; ref_slot?: string; voice?: string }) {
   await sys(`INSERT INTO notifications (user_id,kind,title,body,icon,voice_text,due_at,dedupe_key,ref_type,ref_id,ref_day,ref_slot) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (dedupe_key) DO NOTHING`,
     [n.user_id, n.kind, n.title, n.body, n.icon, n.voice ?? n.body, n.due, n.key, n.ref_type ?? null, n.ref_id ?? null, n.ref_day ?? null, n.ref_slot ?? null]);
+}
+
+/** Push/in-app notification for a new chat message (throttled: at most one unseen chat notification per person per 5 minutes). */
+export async function notifyChat(senderId: string, peerId: string | null, body: string) {
+  const [snd] = await sys(`SELECT display_name FROM users WHERE id=$1`, [senderId]); if (!snd) return;
+  const to = await sys(`SELECT u.id, u.role, u.permissions, s.notifications_enabled, s.quiet_start, s.quiet_end FROM users u LEFT JOIN child_settings s ON s.child_id=u.id
+    WHERE u.active AND u.id <> $1 AND ($2::uuid IS NULL OR u.id = $2)`, [senderId, peerId]);
+  const nowMin = tehranParts().minutes;
+  for (const u of to) {
+    if (u.role !== 'parent' && Number(u.permissions?.chat ?? 2) < 1) continue;
+    if (u.role === 'child' && (!u.notifications_enabled || inQuiet(nowMin, u.quiet_start, u.quiet_end))) continue;
+    const [recent] = await sys(`SELECT 1 FROM notifications WHERE user_id=$1 AND kind='chat' AND seen_at IS NULL AND done_at IS NULL AND due_at > now() - interval '5 minutes'`, [u.id]); if (recent) continue;
+    await enqueue({ user_id: u.id, kind: 'chat', title: `💬 ${snd.display_name}${peerId ? '' : ' (گروه)'}`, body: body.slice(0, 100), icon: '💬', due: new Date(), key: `chat:${u.id}:${Date.now()}`, ref_type: 'chat' });
+  }
+}
+/** Same notification for a list of recipients (used by wishes etc.). */
+export async function notifyUsers(ids: string[], n: { kind: string; title: string; body: string; icon: string; key: string; ref_type?: string; ref_id?: string }) {
+  for (const id of ids) await enqueue({ user_id: id, kind: n.kind, title: n.title, body: n.body, icon: n.icon, due: new Date(), key: `${n.key}:${id}`, ref_type: n.ref_type, ref_id: n.ref_id });
 }
 
 /** Builds due notifications from schedules. Idempotent thanks to dedupe_key. */
@@ -53,6 +71,15 @@ export async function generate(now = new Date()) {
       await enqueue({ user_id: k.id, kind: 'routine', title: r.title, body, icon: r.icon, due, key: `rt:${r.id}:${today}:${slot}:${off}`, ref_type: 'routine', ref_id: r.id, ref_day: today, ref_slot: slot });
     }
   }
+  // nightly reflection: one reminder per child per evening (skipped when already answered or inside quiet hours)
+  for (const k of kids) {
+    if (!k.reflection_enabled) continue;
+    const due = tehranInstant(today, String(k.reflection_time).slice(0, 5));
+    if (now < due || now.getTime() - due.getTime() > 45 * 60000 || inQuiet(nowP.minutes, k.quiet_start, k.quiet_end)) continue;
+    const [done] = await sys(`SELECT 1 FROM reflection_entries WHERE user_id=$1 AND day=$2`, [k.id, today]); if (done) continue;
+    await enqueue({ user_id: k.id, kind: 'reflection', title: 'مرور شبانه', body: `${k.display_name} جان، وقت مرور امروز و گفتن «خدایا شکرت» است 🌙`, icon: '🌙', due, key: `refl:${k.id}:${today}`, ref_type: 'reflection', ref_day: today,
+      voice: `${k.display_name} جان، وقت مرور امروز است. بیا چند تا سؤال کوتاه جواب بدهیم و خدا را شکر کنیم.` });
+  }
   // parent: events, task deadlines, installments, morning/night routines
   const [mom] = await sys(`SELECT id FROM users WHERE role='parent' AND active ORDER BY created_at LIMIT 1`);
   if (!mom) return;
@@ -73,6 +100,26 @@ export async function generate(now = new Date()) {
     if (now < when || now.getTime() - when.getTime() > 4 * 3600000) continue;
     const who = h.person_label ?? ''; await enqueue({ user_id: mom.id, kind: 'health', title: h.title, icon: '🩺', due: when, key: `health:${h.id}:${eve ? 'eve' : 'day'}`, body: `${eve ? 'فردا' : 'امروز'}${h.due_time ? ' ساعت ' + toFaDigits(h.due_time) : ''}: ${h.title}${who ? ' (' + who + ')' : ''}${h.doctor ? ' — ' + h.doctor : ''}` });
   }
+  // wish-board refresh (every few months) and annual dates (3-day heads-up for adults, on the day for everyone) at 09:00
+  if (now >= at('09:00') && now.getTime() - at('09:00').getTime() <= 4 * 3600000) {
+    const boards = await sys(`SELECT b.id, b.user_id, u.display_name, u.role FROM wish_boards b JOIN users u ON u.id=b.user_id WHERE NOT b.archived AND u.active AND (b.starts_on + (b.refresh_months || ' months')::interval)::date <= $1`, [today]);
+    for (const b of boards) {
+      await enqueue({ user_id: b.user_id, kind: 'wish_refresh', title: 'وقت به‌روزرسانی تابلو آرزوها', body: 'چند ماه گذشته! آرزوهای تازه اضافه کن و آن‌هایی را که به آن‌ها رسیده‌ای تیک بزن 🌠', icon: '🌠', due: at('09:00'), key: `wishrefresh:${b.id}`, ref_type: 'wishes' });
+      if (b.role === 'child') await enqueue({ user_id: mom.id, kind: 'wish_refresh', title: `تابلو آرزوهای ${b.display_name}`, body: 'زمان به‌روزرسانی تابلو رسیده است؛ یک گفتگوی خوب درباره‌ی آرزوهایش داشته باشید.', icon: '🌠', due: at('09:00'), key: `wishrefresh-mom:${b.id}`, ref_type: 'wishes' });
+    }
+    const j = toJalali(today); const j3 = toJalali(addDays(today, 3));
+    const dates = await sys(`SELECT d.*, u.display_name AS person FROM occasions d LEFT JOIN users u ON u.id=d.person_id WHERE d.active AND d.notify AND ((d.jm=$1 AND d.jd=$2) OR (d.jm=$3 AND d.jd=$4))`, [j.jm, j.jd, j3.jm, j3.jd]);
+    const everyone = await sys(`SELECT id, role FROM users WHERE active`);
+    for (const d of dates) {
+      const isToday = d.jm === j.jm && d.jd === j.jd; const icon = d.kind === 'birthday' ? '🎂' : d.kind === 'anniversary' ? '💍' : (d.icon || '🎉');
+      for (const u of everyone) {
+        if (!isToday && u.role === 'child') continue;                    // heads-up only for adults
+        if (d.audience === 'adults' && u.role === 'child') continue;
+        if (d.audience === 'kids' && u.role !== 'child') continue;
+        await enqueue({ user_id: u.id, kind: 'family_date', title: d.title, body: isToday ? `امروز: ${d.title} ${icon}` : `۳ روز دیگر: ${d.title} ${icon}`, icon, due: at('09:00'), key: `fd:${d.id}:${isToday ? today : addDays(today, 3)}:${u.id}`, ref_type: 'family_date' });
+      }
+    }
+  }
   // nightly backup at 03:00 (once per day)
   if (process.env.BACKUP_AUTO !== 'off' && (await backupDue(nowP.hour, now))) {
     try { await runBackup(); } catch (e: any) { await enqueue({ user_id: mom.id, kind: 'backup', title: 'پشتیبان‌گیری ناموفق بود', body: `پشتیبان‌گیری خودکار انجام نشد: ${String(e.message).slice(0, 120)}`, icon: '⚠️', due: now, key: `backupfail:${today}` }); }
@@ -83,7 +130,7 @@ export async function generate(now = new Date()) {
     const [t] = await sys(`SELECT count(*) FILTER (WHERE status='done' AND done_at > now() - interval '7 days')::int done, count(*) FILTER (WHERE status IN ('todo','doing','waiting'))::int open FROM tasks`);
     const [rq] = await sys(`SELECT count(*)::int n FROM purchase_requests WHERE status='requested'`);
     const [sp] = await sys(`SELECT COALESCE(SUM(amount),0)::bigint s FROM transactions WHERE kind='expense' AND occurred_on > $1`, [addDays(today, -7)]);
-    await enqueue({ user_id: mom.id, kind: 'weekly', title: 'گزارش هفتگی خانواده', icon: '📊', due: at('18:00'), key: `weekly:${today}`,
+    await enqueue({ user_id: mom.id, kind: 'weekly', title: 'گزارش هفتگی خانواده', icon: '📊', due: at('18:00'), key: `weekly:${today}`, ref_type: 'weekly_report',
       body: `${kidsRows.map((k: any) => `${k.display_name}: ${toFaDigits(k.stars)} ستاره، ${toFaDigits(k.habits)} عادت`).join(' | ')} — کار انجام‌شده: ${toFaDigits(t.done)}، باز: ${toFaDigits(t.open)} — درخواست خرید منتظر: ${toFaDigits(rq.n)} — هزینه‌ی هفته: ${fmtMoney(sp.s)} تومان` });
   }
   if (now >= at('07:00') && now.getTime() - at('07:00').getTime() <= 3 * 3600000) {

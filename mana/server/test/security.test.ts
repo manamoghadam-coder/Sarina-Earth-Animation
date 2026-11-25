@@ -489,3 +489,103 @@ test('first-run setup is refused when users exist; creation works on an empty DB
   const tgt = await mk('t_adm4', 'parent').then(() => ids.t_adm4); assert.equal((await call('t_mom', 'PATCH', `/api/users/${tgt}`, { active: false })).statusCode, 200);   // t_mom is still active
   await sys(`UPDATE users SET active=true WHERE id = ANY($1)`, [others]); await sys(`DELETE FROM users WHERE username='t_adm4'`);
 });
+
+test('diary: author only; Mana reads CHILDREN\'s diaries read-only; adults\' diaries and siblings stay private', async () => {
+  await sys(`UPDATE users SET active=true, password_hash=$2 WHERE id=$1`, [ids.t_sa, await hashPassword(PW)]); await sys(`UPDATE users SET active=true WHERE id=$1`, [ids.t_dad]);
+  for (const u of ['t_mom', 't_sa', 't_sm', 't_dad']) await signIn(u);
+  const mine = await call('t_sa', 'POST', '/api/diary', { title: 'امروز', body: 'متن خصوصی سارینا', mood: '😊' }); assert.equal(mine.statusCode, 201, mine.body);
+  const id = JSON.parse(mine.body).id;
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/diary')).body).length, 1);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/diary')).body).length, 0);                                            // sibling sees none
+  assert.equal(JSON.parse((await call('t_sm', 'GET', `/api/diary?user_id=${ids.t_sa}`)).body).length, 0);                       // ...even when asking for it
+  assert.equal(JSON.parse((await call('t_dad', 'GET', `/api/diary?user_id=${ids.t_sa}`)).body).length, 0);                      // father cannot read children's diary
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/diary?user_id=${ids.t_sa}`)).body).length, 1);                      // Mana can (read-only)
+  assert.equal((await call('t_mom', 'PATCH', `/api/diary/${id}`, { body: 'changed' })).statusCode, 404);                         // not Mana's entry: cannot edit
+  assert.equal((await call('t_sa', 'PATCH', `/api/diary/${id}`, { body: 'ویرایش' })).statusCode, 200);
+  await call('t_dad', 'POST', '/api/diary', { body: 'راز وحید' });
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/diary?user_id=${ids.t_dad}`)).body).length, 0);                      // adults' diaries are private even from Mana
+  // Mana switches the feature off for one child
+  assert.equal((await call('t_mom', 'PATCH', `/api/members/${ids.t_sm}`, { permissions: { diary: 0 } })).statusCode, 200);
+  assert.equal((await call('t_sm', 'POST', '/api/diary', { body: 'x' })).statusCode, 403);
+  assert.equal((await call('t_mom', 'PATCH', `/api/members/${ids.t_sm}`, { permissions: { finance: 2 } })).statusCode, 400);       // children never get work modules
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_sm}`, { permissions: { diary: 2 } });
+  assert.equal((await call('t_sa', 'DELETE', `/api/diary/${id}`)).statusCode, 200);
+});
+test('Mom\'s messages: Mana writes, only the recipient reads and can only mark as read', async () => {
+  const r = await call('t_mom', 'POST', '/api/mom-messages', { to: [ids.t_sa], title: 'موفق باشی', body: 'فردا امتحان داری، به تو افتخار می‌کنم 💜' }); assert.equal(r.statusCode, 201, r.body);
+  const mine = JSON.parse((await call('t_sa', 'GET', '/api/mom-messages')).body); assert.equal(mine.length, 1); assert.equal(mine[0].read_at, null);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/mom-messages/unread')).body).count, 1);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/mom-messages')).body).length, 0);
+  assert.equal((await call('t_sa', 'POST', '/api/mom-messages', { to: 'all', body: 'جعلی' })).statusCode, 403);
+  await assert.rejects(withActor({ id: ids.t_sa, role: 'child' }, (q) => q(`UPDATE mom_messages SET body='hack' WHERE to_user=$1`, [ids.t_sa])));        // recipient may change read_at only
+  assert.equal((await call('t_sa', 'POST', `/api/mom-messages/${mine[0].id}/read`, {})).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/mom-messages/unread')).body).count, 0);
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE ref_type='mom_message' AND user_id=$1`, [ids.t_sa]))[0].n, 1);                     // child was notified
+  await sys(`DELETE FROM mom_messages WHERE to_user=$1`, [ids.t_sa]);
+});
+test('family chat: group for everyone with the feature; DMs readable only by the two people (not even Mana)', async () => {
+  assert.equal((await call('t_sa', 'POST', '/api/chat', { body: 'سلام به همه' })).statusCode, 201);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/chat')).body).messages.some((m: any) => m.body === 'سلام به همه'), true);
+  assert.equal((await call('t_sa', 'POST', '/api/chat', { body: 'راز بین ما', peer_id: ids.t_sm })).statusCode, 201);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', `/api/chat?peer=${ids.t_sa}`)).body).messages.length, 1);
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/chat?peer=${ids.t_sa}`)).body).messages.length, 0);                                                // Mana cannot read the DM
+  assert.equal(JSON.parse((await call('t_dad', 'GET', `/api/chat?peer=${ids.t_sa}`)).body).messages.length, 0);
+  assert.equal((await call('t_sa', 'POST', '/api/chat', { body: 'x', peer_id: ids.t_sa })).statusCode >= 400, true);                                             // no self-DM
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_sm}`, { permissions: { chat: 0 } });
+  assert.equal((await call('t_sm', 'GET', '/api/chat')).statusCode, 403);
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_sm}`, { permissions: { chat: 2 } });
+  await sys(`DELETE FROM chat_messages`); await sys(`DELETE FROM notifications WHERE kind='chat'`);
+});
+test('nightly reflection: editable questions, one entry per day, stars only once, Mana reads children\'s answers', async () => {
+  const t = JSON.parse((await call('t_sa', 'GET', '/api/reflection/today')).body); assert.ok(t.questions.length >= 5); assert.equal(t.entry, null);
+  await call('t_mom', 'PATCH', `/api/children/${ids.t_sa}/settings`, { reflection_stars: 2 });
+  const answers = t.questions.map((q: any) => ({ q: q.text, kind: q.kind, a: 'جواب ' + q.text.slice(0, 4) }));
+  const r1 = JSON.parse((await call('t_sa', 'PUT', '/api/reflection/today', { answers })).body); assert.equal(r1.stars, 2);
+  assert.equal(JSON.parse((await call('t_sa', 'PUT', '/api/reflection/today', { answers })).body).stars, 0);                                                     // no second reward
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/reflection?user_id=${ids.t_sa}`)).body).length, 1);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', `/api/reflection?user_id=${ids.t_sa}`)).body).length, 0);
+  assert.equal((await call('t_sa', 'POST', '/api/reflection-questions', { text: 'x' })).statusCode, 403);
+  assert.equal((await call('t_mom', 'POST', '/api/reflection-questions', { child_id: ids.t_sa, text: 'امروز چه چیزی دوست داشتی؟' })).statusCode, 201);
+  assert.ok(JSON.parse((await call('t_sa', 'GET', '/api/reflection/today')).body).questions.some((q: any) => /دوست داشتی/.test(q.text)));
+  assert.equal(JSON.parse((await call('t_sm', 'GET', '/api/reflection/today')).body).questions.some((q: any) => /دوست داشتی/.test(q.text)), false);           // question was for Sarina only
+  await sys(`DELETE FROM reflection_questions WHERE child_id IS NOT NULL`); await call('t_mom', 'PATCH', `/api/children/${ids.t_sa}/settings`, { reflection_stars: 0 });
+  // reminder at the configured time, once
+  await call('t_mom', 'PATCH', `/api/children/${ids.t_sm}/settings`, { reflection_time: '20:30', notifications_enabled: true }); await sys(`UPDATE child_settings SET quiet_start='00:00', quiet_end='00:00' WHERE child_id=$1`, [ids.t_sm]);
+  await generate(tehranInstant(todayISO(), '20:35')); await generate(tehranInstant(todayISO(), '20:40'));
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE user_id=$1 AND kind='reflection'`, [ids.t_sm]))[0].n, 1);
+});
+test('wish board: own board, Mana reads children\'s, achieve notifies Mana, renew archives and carries over', async () => {
+  const b0 = JSON.parse((await call('t_sa', 'GET', '/api/wishes/board')).body); assert.ok(b0.board);
+  const w = JSON.parse((await call('t_sa', 'POST', '/api/wishes', { title: 'دوچرخه', kind: 'dream', note: 'قرمز' })).body);
+  const w2 = JSON.parse((await call('t_sa', 'POST', '/api/wishes', { title: 'سفر به شمال', kind: 'place' })).body);
+  assert.equal(JSON.parse((await call('t_mom', 'GET', `/api/wishes/board?user_id=${ids.t_sa}`)).body).wishes.length, 2);
+  assert.equal(JSON.parse((await call('t_sm', 'GET', `/api/wishes/board?user_id=${ids.t_sa}`)).body).wishes.length, 0);            // asking for a sibling's board returns his/her own
+  assert.equal((await call('t_sm', 'PATCH', `/api/wishes/${w.id}`, { title: 'hack' })).statusCode, 404);
+  assert.equal((await call('t_sa', 'POST', `/api/wishes/${w.id}/achieve`, { achieved: true })).statusCode, 200);
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE kind='wish_done' AND user_id=$1`, [ids.t_mom]))[0].n >= 1, true);
+  const nb = JSON.parse((await call('t_sa', 'POST', '/api/wishes/board/renew', { carry_over: true })).body);
+  const after = JSON.parse((await call('t_sa', 'GET', '/api/wishes/board')).body); assert.equal(after.board.id, nb.id); assert.equal(after.wishes.length, 1); assert.equal(after.wishes[0].title, 'سفر به شمال'); assert.equal(after.archived.length, 1);
+  void w2; assert.equal((await call('t_sa', 'POST', '/api/wishes/photo', {})).statusCode >= 400, true);
+});
+test('weekly report (Mana only), meal plan, profile photo, annual dates with notifications', async () => {
+  const rep = await call('t_mom', 'GET', '/api/reports/weekly'); assert.equal(rep.statusCode, 200, rep.body); const j = JSON.parse(rep.body); assert.ok(Array.isArray(j.kids) && Array.isArray(j.highlights) && j.week_fa);
+  assert.equal((await call('t_sa', 'GET', '/api/reports/weekly')).statusCode, 403); assert.equal((await call('t_dad', 'GET', '/api/reports/weekly')).statusCode, 403);
+  const day = todayISO();
+  await call('t_mom', 'PATCH', `/api/members/${ids.t_dad}`, { permissions: { shopping: 2 } });
+  assert.equal((await call('t_dad', 'PUT', '/api/meals', { day, slot: 'dinner', title: 'قورمه‌سبزی' })).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', `/api/meals?from=${day}&to=${day}`)).body)[0].title, 'قورمه‌سبزی');          // children can see the plan
+  assert.equal((await call('t_sa', 'PUT', '/api/meals', { day, slot: 'lunch', title: 'x' })).statusCode, 403);
+  await call('t_mom', 'PUT', '/api/meals', { day, slot: 'dinner', title: '' });
+  // avatar: each person can set their own profile photo; others can see it
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'); const m = multipart({}, 'a.png', png);
+  const av = await app.inject({ method: 'POST', url: '/api/me/avatar', headers: { ...H, cookie: jar.t_sa, 'content-type': m['content-type'] }, payload: m.payload }); assert.equal(av.statusCode, 201, av.body);
+  const pid = JSON.parse(av.body).avatar_photo_id; assert.equal((await call('t_sm', 'GET', `/api/photos/${pid}/file`)).statusCode, 200);
+  assert.equal(JSON.parse((await call('t_sa', 'GET', '/api/photos')).body).some((p: any) => p.id === pid), false);                    // avatars stay out of the gallery
+  // annual dates (occasions) with notification: today's birthday reaches everyone it is meant for
+  const { jm, jd } = toJalali(day);
+  const oc = JSON.parse((await call('t_mom', 'POST', '/api/occasions', { title: 'تولد-اعلان', kind: 'birthday', jm, jd, notify: true, audience: 'all', person_id: ids.t_sa })).body);
+  await generate(tehranInstant(day, '09:10')); await generate(tehranInstant(day, '09:20'));
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE dedupe_key LIKE $1`, [`fd:${oc.id}:%`]))[0].n >= 3, true);
+  assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE dedupe_key = $1`, [`fd:${oc.id}:${day}:${ids.t_sa}`]))[0].n, 1);       // exactly once per person
+  await sys(`DELETE FROM occasions WHERE id=$1`, [oc.id]);
+});

@@ -61,7 +61,7 @@ export async function requireUser(req: FastifyRequest, reply: FastifyReply) {
   if (!token) return reply.code(401).send({ error: 'unauthenticated' });
   const [s] = await sys(`SELECT u.id, u.role, u.permissions FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > now() AND u.active`, [sha(token)]);
   if (!s) return reply.code(401).send({ error: 'unauthenticated' });
-  req.actor = { id: s.id, role: s.role, perms: s.role === 'member' ? s.permissions : undefined };
+  req.actor = { id: s.id, role: s.role, perms: s.role === 'parent' ? undefined : s.permissions };
   // CSRF defence in depth (cookie is SameSite=Strict): state-changing requests must be same-origin XHR/fetch
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers['x-requested-with'] !== 'mana') return reply.code(403).send({ error: 'csrf' });
 }
@@ -71,10 +71,19 @@ export async function requireParent(req: FastifyRequest, reply: FastifyReply) {
   if (req.actor!.role !== 'parent') return reply.code(403).send({ error: 'forbidden' });
 }
 
+/** Work modules: only Mana and adult members (Vahid) can ever hold them. */
 export const MODULES = ['tasks', 'events', 'finance', 'debts', 'goals', 'children', 'photos', 'library', 'recipes', 'shopping', 'health'] as const;
-export const level = (a: Actor, m: string) => (a.role === 'parent' ? 2 : a.role === 'member' ? Math.min(2, Math.max(0, Number(a.perms?.[m] ?? 0))) : 0);
+/** Personal features for EVERY non-parent account (children and members); Mana always has full access. Defaults apply until Mana sets a value. */
+export const FEATURE_DEFAULTS = { diary: 2, chat: 2, inbox: 1, avatar: 2, wishes: 2 } as const;
+export const FEATURES = Object.keys(FEATURE_DEFAULTS) as (keyof typeof FEATURE_DEFAULTS)[];
+export const level = (a: Actor, m: string) => {
+  if (a.role === 'parent') return 2;
+  const clamp = (n: number) => Math.min(2, Math.max(0, n));
+  if (m in FEATURE_DEFAULTS) return clamp(Number(a.perms?.[m] ?? FEATURE_DEFAULTS[m as keyof typeof FEATURE_DEFAULTS]));
+  return a.role === 'member' ? clamp(Number(a.perms?.[m] ?? 0)) : 0;
+};
 /** API-level gate (the database enforces the same rule through RLS). need: 1=read, 2=write. */
-export const requirePerm = (m: (typeof MODULES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {
+export const requirePerm = (m: (typeof MODULES)[number] | (typeof FEATURES)[number], need: 1 | 2) => async (req: FastifyRequest, reply: FastifyReply) => {
   await requireUser(req, reply);
   if (reply.sent) return;
   if (level(req.actor!, m) < need) return reply.code(403).send({ error: 'forbidden' });
