@@ -6,7 +6,7 @@ import { QuotesPanel } from './QuotesPanel';
 import { ContentPanel } from './ContentPanel';
 import { AccountsPanel, BackupPanel, MessengerPanel, TwoFactorPanel } from './SecurityPanels';
 import { PushPanel } from '../notify';
-import { ttsStatus, sttSupported } from '../voice';
+import { VoiceSettings } from '../VoiceSettings';
 import { Field, useAction } from '../ui';
 
 export default function SettingsPage() {
@@ -20,9 +20,7 @@ export default function SettingsPage() {
     {me!.role === 'parent' && <TwoFactorPanel />}
     {me!.role === 'parent' && <BackupPanel />}
     <section className="card"><h2 className="font-bold mb-2">🔔 اعلان روی این دستگاه</h2><PushPanel /><p className="text-xs text-slate-500 mt-2">برای دریافت اعلان هنگام بسته بودن برنامه، باید روی هر دستگاه یک‌بار فعال شود.</p></section>
-    <section className="card"><h2 className="font-bold mb-2">🎙️ وضعیت قابلیت صوتی این دستگاه</h2>
-      <p>خواندن متن فارسی: <b>{({ ok: 'آماده (صدای فارسی موجود)', maybe: 'موتور گفتار هست ولی صدای فارسی گزارش نشده؛ آزمایش کنید', none: 'پشتیبانی نمی‌شود' })[ttsStatus()]}</b></p>
-      <p>تشخیص گفتار فارسی: <b>{sttSupported() ? 'پشتیبانی می‌شود (نیاز به اینترنت)' : 'پشتیبانی نمی‌شود؛ جایگزین: دکمه‌های تصویری'}</b></p></section>
+    <section className="card"><h2 className="font-bold mb-2">🎙️ صدا (این دستگاه)</h2><VoiceSettings /></section>
     <section className="card"><h2 className="font-bold mb-2">🔑 تغییر رمز عبور</h2>
       <Field label="رمز فعلی"><input type="password" className="input" dir="ltr" value={cur} onChange={(e) => setCur(e.target.value)} /></Field>
       <Field label="رمز جدید (حداقل ۸ نویسه)"><input type="password" className="input" dir="ltr" value={nxt} onChange={(e) => setNxt(e.target.value)} /></Field>

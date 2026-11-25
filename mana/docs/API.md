@@ -95,3 +95,18 @@ CRUD استاندارد (`GET` فهرست، `POST` ایجاد، `PATCH /:id`، `
 | `GET/POST /tasks/:id/files` · `GET/DELETE /task-files/:id[/file]` | پیوست کار: PDF، عکس، docx/xlsx/pptx تا ۲۵MB |
 | `GET /backups` (+ `intervalHours`, `keep`, `lastCheck`) · `PUT /backups/settings` · `POST /backups/run[?force=1]` | پشتیبان بدون تکرار؛ نتیجه شامل `skipped` برای بخش‌های بدون تغییر |
 متغیرهای محیطی: `MESSENGER_PROVIDERS`، `BALE_BOT_TOKEN`، `BALE_API_BASE`، `TELEGRAM_BOT_TOKEN`، `TELEGRAM_API_BASE`، `BACKUP_INTERVAL_HOURS`، `BACKUP_KEEP`.
+
+## مرحله‌ی ۴: ویژگی‌های شخصی و اجتماعی (منتقل‌شده)
+| مسیر | شرح |
+|---|---|
+| `GET/POST/PATCH/DELETE /diary` (`?user_id=` فقط مانا برای کودکان) | دفترچه (ویژگی `diary`) |
+| `GET/POST/PATCH/DELETE /mom-messages` · `POST /mom-messages/:id/read` · `GET /mom-messages/unread` | پیام‌های مانا (ویژگی `inbox`) |
+| `GET /chat[?peer=&after=]` · `GET /chat/summary` · `POST /chat {body,peer_id?}` · `DELETE /chat/:id` | چت گروهی و خصوصی (ویژگی `chat`) |
+| `GET/PUT /reflection/today` · `GET /reflection` · CRUD `/reflection-questions` 🔒 | مرور شبانه |
+| `GET /wishes/board[?user_id=]` · `POST /wishes/photo` · `POST/PATCH/DELETE /wishes` · `POST /wishes/:id/achieve` · `POST /wishes/board/renew` · `PATCH /wishes/board` | تابلو آرزوها (ویژگی `wishes`) |
+| `GET /reports/weekly[?week_start=]` 🔒 | گزارش هفتگی |
+| `GET /meals?from&to` · `PUT /meals` | برنامه‌ی غذایی |
+| `POST /me/avatar` | عکس پروفایل خود فرد (ویژگی `avatar`) |
+| `POST /children/:id/sample-data` 🔒 | برنامه‌ی نمونه‌ی اختیاری |
+| `PATCH /members/:id {permissions:{diary,inbox,chat,wishes,avatar,…}}` 🔒 | ویژگی‌ها برای بزرگسال و کودک؛ ماژول‌های کاری فقط برای بزرگسال |
+سطح ویژگی‌ها: ۰ بدون دسترسی، ۱ مشاهده، ۲ مشاهده و نوشتن. پیش‌فرض: diary ۲، chat ۲، inbox ۱، avatar ۲، wishes ۲.

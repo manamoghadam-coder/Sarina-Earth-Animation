@@ -589,3 +589,14 @@ test('weekly report (Mana only), meal plan, profile photo, annual dates with not
   assert.equal((await sys(`SELECT count(*)::int n FROM notifications WHERE dedupe_key = $1`, [`fd:${oc.id}:${day}:${ids.t_sa}`]))[0].n, 1);       // exactly once per person
   await sys(`DELETE FROM occasions WHERE id=$1`, [oc.id]);
 });
+
+test('sample data: optional, idempotent, age-appropriate', async () => {
+  await sys(`DELETE FROM activities WHERE child_id=ANY($1)`, [[ids.t_sa, ids.t_sm]]); await sys(`DELETE FROM routines WHERE child_id=ANY($1)`, [[ids.t_sa, ids.t_sm]]);
+  assert.equal((await call('t_sa', 'POST', `/api/children/${ids.t_sa}/sample-data`, {})).statusCode, 403);
+  const r1 = JSON.parse((await call('t_mom', 'POST', `/api/children/${ids.t_sa}/sample-data`, {})).body); assert.equal(r1.added.activities, 7); assert.ok(r1.added.routines >= 4);
+  const r2 = JSON.parse((await call('t_mom', 'POST', `/api/children/${ids.t_sa}/sample-data`, {})).body); assert.deepEqual(r2.added, { activities: 0, routines: 0, rewards: 0, goals: 0 });          // second click adds nothing
+  const sm = JSON.parse((await call('t_mom', 'POST', `/api/children/${ids.t_sm}/sample-data`, {})).body); assert.equal(sm.added.activities, 5);                              // 7-year-old gets the young template
+  assert.equal((await sys(`SELECT count(*)::int n FROM activities WHERE child_id=$1 AND title='کلاس رقص'`, [ids.t_sm]))[0].n, 0);
+  assert.equal((await sys(`SELECT start_time::text t FROM activities WHERE child_id=$1 AND title='شاهنامه‌خوانی'`, [ids.t_sa]))[0].t, null);                                        // class without a time gets no reminder
+  await sys(`DELETE FROM activities WHERE child_id=ANY($1)`, [[ids.t_sa, ids.t_sm]]); await sys(`DELETE FROM routines WHERE child_id=ANY($1)`, [[ids.t_sa, ids.t_sm]]);
+});

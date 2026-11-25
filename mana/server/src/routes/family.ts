@@ -14,6 +14,24 @@ export const activitySchema = z.object({
   notify: z.boolean().optional(), notify_text: z.string().max(200).nullable().optional(), remind_offsets: z.array(z.number().int().min(-240).max(240)).max(5).nullable().optional(), active: z.boolean().optional(),
 });
 
+
+/** Optional starter content for a child's account (idempotent: only adds what is missing, by title). Times are SAMPLE values for Mana to adjust. */
+const SAMPLE = {
+  teen: {
+    activities: [['کلاس رقص', 'class', '💃', [1, 3], '17:00', '19:30', 5], ['کلاس فن بیان', 'class', '🎤', [2], '18:45', '20:00', 5], ['شاهنامه‌خوانی', 'class', '📜', [4], null, null, 5],
+      ['مطالعه روزانه (۵ صفحه)', 'reading', '📖', [0, 1, 2, 3, 4, 5], '16:00', '16:30', 3], ['تمرین سنتور', 'music', '🎵', [0, 1, 2, 3, 4, 5], '15:30', '16:00', 5],
+      ['انجام تکالیف و مرور دروس', 'homework', '✏️', [0, 1, 2, 3, 4], '14:30', '15:30', 5], ['تمرین زبان', 'language', '🔤', [0, 2, 4], '20:15', '20:45', 3]],
+    routines: [['habit', 'مسواک زدن', '🪥', ['08:00', '21:00']], ['habit', 'نظافت اتاق', '🧹', ['17:30']], ['habit', 'روتین پوستی', '🧴', ['21:30']], ['habit', 'نوشیدن آب', '💧', ['10:00', '14:00', '18:00']]],
+    rewards: [['انتخاب فیلم خانوادگی', '🎬', 40], ['خرید یک کتاب', '📕', 80], ['تفریح آخر هفته', '🎡', 100]], goals: [['جمع کردن ۱۰۰ ستاره', '🌟', 100]],
+  },
+  young: {
+    activities: [['تکالیف', 'homework', '✏️', [0, 1, 2, 3, 4], '16:00', '16:30', 5], ['تمرین نوشتن و خواندن', 'writing', '🖍️', [0, 1, 2, 3, 4], '17:00', '17:30', 5], ['کتاب خواندن', 'reading', '📚', [0, 1, 2, 3, 4, 5], '18:00', '18:20', 3],
+      ['قصه', 'story', '🐻', [0, 1, 2, 3, 4, 5, 6], '20:00', '20:20', 2], ['مرتب کردن اتاق', 'chore', '🧸', [0, 1, 2, 3, 4, 5, 6], '19:00', '19:15', 3]],
+    routines: [['habit', 'مسواک زدن', '🪥', ['08:00', '20:30']], ['habit', 'مرتب کردن اسباب‌بازی‌ها', '🧸', ['18:30']], ['habit', 'نوشیدن آب', '💧', ['10:00', '14:00']]],
+    rewards: [['انتخاب فیلم خانوادگی', '🎬', 30], ['تفریح آخر هفته', '🎡', 100], ['یک بستنی', '🍦', 20]], goals: [['جمع کردن ۵۰ ستاره', '🌟', 50]],
+  },
+} as const;
+
 export default async function familyRoutes(app: FastifyInstance) {
   // ----- parent: children overview -----
   app.get('/api/children', { preHandler: requirePerm('children', 1) }, async (req) => withActor(req.actor!, async (q) => {
@@ -41,6 +59,22 @@ export default async function familyRoutes(app: FastifyInstance) {
   crud(app, 'activities', 'activities', activitySchema, 'start_time NULLS LAST', ['child_id'], 'children');
   crud(app, 'rewards', 'rewards', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), cost_stars: z.number().int().min(1).max(100000), active: z.boolean().optional() }), 'cost_stars', ['child_id'], 'children');
   crud(app, 'child-goals', 'child_goals', z.object({ child_id: zId, title: zText(), icon: z.string().max(8).optional(), target_stars: z.number().int().min(1).nullable().optional(), done: z.boolean().optional() }), 'title', ['child_id'], 'children');
+
+  // optional starter schedule / routines / rewards (by the child's age group); returns how many items were added
+  app.post('/api/children/:id/sample-data', { preHandler: requirePerm('children', 2) }, async (req, reply) => {
+    const cid = zId.parse((req.params as any).id);
+    return withActor(req.actor!, async (q) => {
+      const [u] = await q(`SELECT age_group FROM users WHERE id=$1 AND role='child'`, [cid]); if (!u) return reply.code(404).send({ error: 'not_found' });
+      const t = SAMPLE[u.age_group === 'young' ? 'young' : 'teen']; const added = { activities: 0, routines: 0, rewards: 0, goals: 0 };
+      for (const [title, kind, icon, weekdays, st, en, stars] of t.activities) {
+        const r = await q(`INSERT INTO activities (child_id,title,kind,icon,weekdays,start_time,end_time,stars,notify) SELECT $1,$2,$3,$4,$5,$6::time,$7::time,$8,$6::time IS NOT NULL WHERE NOT EXISTS (SELECT 1 FROM activities WHERE child_id=$1 AND title=$2) RETURNING id`, [cid, title, kind, icon, weekdays, st, en, stars]); added.activities += r.length; }
+      for (const [kind, title, icon, times] of t.routines) {
+        const r = await q(`INSERT INTO routines (child_id,kind,title,icon,times) SELECT $1,$2,$3,$4,$5::time[] WHERE NOT EXISTS (SELECT 1 FROM routines WHERE child_id=$1 AND title=$3) RETURNING id`, [cid, kind, title, icon, times]); added.routines += r.length; }
+      for (const [title, icon, cost] of t.rewards) { const r = await q(`INSERT INTO rewards (child_id,title,icon,cost_stars) SELECT $1,$2,$3,$4 WHERE NOT EXISTS (SELECT 1 FROM rewards WHERE child_id=$1 AND title=$2) RETURNING id`, [cid, title, icon, cost]); added.rewards += r.length; }
+      for (const [title, icon, target] of t.goals) { const r = await q(`INSERT INTO child_goals (child_id,title,icon,target_stars) SELECT $1,$2,$3,$4 WHERE NOT EXISTS (SELECT 1 FROM child_goals WHERE child_id=$1 AND title=$2) RETURNING id`, [cid, title, icon, target]); added.goals += r.length; }
+      return { ok: true, added };
+    });
+  });
 
   // ----- parent: approvals -----
   app.get('/api/completions', { preHandler: requirePerm('children', 1) }, async (req) => {

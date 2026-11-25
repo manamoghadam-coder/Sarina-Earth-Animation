@@ -10,6 +10,12 @@ import { HabitsPage, RequestsPage, SuggestPage } from './ChildMore';
 import { FactsPage, MoneyHub } from './ChildLearn';
 import { LibraryKidPage, RecipesKidPage } from './ChildLibrary';
 import { AskPage } from './AskPage';
+import Diary from '../social/Diary';
+import Messages from '../social/Messages';
+import Chat from '../social/Chat';
+import Wishes from '../social/Wishes';
+import Profile from './Profile';
+import Night from './Night';
 import { ReadAloudBar, ReadProvider } from './ReadAloud';
 
 export default function ChildApp() {
@@ -20,7 +26,7 @@ export default function ChildApp() {
     <ReadProvider initialOn={!!me!.settings?.read_aloud_default}>
       <NotificationCenter speakAloud={!!me!.settings?.voice_notifications} kid paused={open} />
       <header className="flex items-center gap-3 p-3 sticky top-0 z-20 backdrop-blur bg-white/60">
-        {loc.pathname !== '/' ? <Link to="/" className="btn !bg-[var(--k3)] !text-xl !rounded-2xl" aria-label="خانه">🏠 خانه</Link> : <Avatar id={me!.avatar_photo_id} name={me!.display_name} size={44} />}
+        {loc.pathname !== '/' ? <Link to="/" className="btn !bg-[var(--k3)] !text-xl !rounded-2xl" aria-label="خانه">🏠 خانه</Link> : <Link to="/profile" aria-label="عکس پروفایل من"><Avatar id={me!.avatar_photo_id} name={me!.display_name} size={44} /></Link>}
         <b className="flex-1 text-xl">{loc.pathname === '/' ? `سلام ${me!.display_name} جان!` : ''}</b>
         <button className="text-sm underline opacity-70" onClick={logout}>خروج</button></header>
       <main className="p-3 pb-40 max-w-2xl mx-auto space-y-3">
@@ -28,7 +34,7 @@ export default function ChildApp() {
         {ttsStatus() === 'none' && <div role="alert" className="kid-card !bg-amber-100 text-sm">⚠️ این مرورگر صدا ندارد (خواندن متن پشتیبانی نمی‌شود). از Chrome استفاده کنید.</div>}
         <ReadAloudBar />
         <Routes><Route path="/" element={<Home />} /><Route path="/today" element={<TodayPage />} /><Route path="/homework" element={<TodayPage onlyKinds={['homework', 'writing', 'study']} title="تکالیف من" />} /><Route path="/week" element={<WeekPage />} />
-          <Route path="/stars" element={<StarsPage />} /><Route path="/gallery" element={<Gallery />} /><Route path="/habits" element={<HabitsPage />} /><Route path="/requests" element={<RequestsPage />} /><Route path="/suggest" element={<SuggestPage />} /><Route path="/facts" element={<FactsPage />} /><Route path="/ask" element={<AskPage />} /><Route path="/library" element={<LibraryKidPage />} /><Route path="/recipes" element={<RecipesKidPage />} /><Route path="/money" element={<MoneyHub />} /><Route path="/stories" element={<StoriesPage />} /></Routes></main>
+          <Route path="/stars" element={<StarsPage />} /><Route path="/gallery" element={<Gallery />} /><Route path="/habits" element={<HabitsPage />} /><Route path="/requests" element={<RequestsPage />} /><Route path="/suggest" element={<SuggestPage />} /><Route path="/facts" element={<FactsPage />} /><Route path="/ask" element={<AskPage />} /><Route path="/diary" element={<Diary />} /><Route path="/messages" element={<Messages />} /><Route path="/chat" element={<Chat />} /><Route path="/wishes" element={<Wishes />} /><Route path="/profile" element={<Profile />} /><Route path="/night" element={<Night />} /><Route path="/library" element={<LibraryKidPage />} /><Route path="/recipes" element={<RecipesKidPage />} /><Route path="/money" element={<MoneyHub />} /><Route path="/stories" element={<StoriesPage />} /></Routes></main>
       {/* fixed, always-visible assistant button */}
       <button onClick={() => setOpen(true)} aria-label="دستیار من" className="fixed z-[70] bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 mx-auto max-w-md rounded-full bg-[var(--k1)] text-white text-2xl font-extrabold py-5 shadow-[0_8px_0_rgba(0,0,0,.2)] active:translate-y-1">دستیار من 🎙️</button>
       {open && <AssistantSheet onClose={() => setOpen(false)} />}

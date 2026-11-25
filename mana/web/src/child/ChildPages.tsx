@@ -7,9 +7,12 @@ import { Empty, Loading, Mixed, Modal, useLoad, useToast } from '../ui';
 import { speak, spokenTime, ttsStatus } from '../voice';
 import { PushPanel } from '../notify';
 import { useReadable } from './ReadAloud';
+import { VoiceSettings } from '../VoiceSettings';
+import { useUnread } from '../social/badges';
+import { WishOfTheDay } from '../social/Wishes';
 import { STORIES } from './stories';
 
-const TILES = [
+const TILES: { to: string; icon: string; title: string; desc: string; c: string; perm?: string }[] = [
   { to: '/today', icon: '📅', title: 'برنامه امروز', desc: 'اینجا می‌توانی برنامه‌ی امروزت را ببینی.', c: 'var(--k1)' },
   { to: '/homework', icon: '✏️', title: 'تکالیف من', desc: 'اینجا می‌توانی تکالیف مدرسه‌ات را ببینی.', c: 'var(--k3)' },
   { to: '/stories', icon: '🐻', title: 'قصه‌های من', desc: 'اینجا می‌توانی قصه‌های جالب گوش کنی.', c: 'var(--k4)' },
@@ -20,28 +23,36 @@ const TILES = [
   { to: '/money', icon: '🐷', title: 'پول و پس‌انداز', desc: 'اینجا پول‌توجیبی و قلک‌هایت را می‌بینی و درس پول یاد می‌گیری.', c: 'var(--k2)' },
   { to: '/library', icon: '📚', title: 'کتابخانه', desc: 'اینجا کتاب‌ها و قصه‌های صوتی را می‌خوانی و گوش می‌کنی.', c: 'var(--k1)' },
   { to: '/recipes', icon: '🍳', title: 'آشپزی', desc: 'اینجا دستور غذاهای خوشمزه را می‌بینی.', c: 'var(--k4)' },
+  { to: '/messages', icon: '💌', title: 'پیام مامان', desc: 'اینجا پیام‌ها و نامه‌های مامان را می‌خوانی یا می‌شنوی.', c: 'var(--k4)', perm: 'inbox' },
+  { to: '/night', icon: '🌙', title: 'مرور امروز', desc: 'اینجا هر شب چند سؤال کوتاه درباره‌ی امروزت جواب می‌دهی و خدا را شکر می‌کنی.', c: 'var(--k3)', perm: 'diary' },
+  { to: '/wishes', icon: '🌠', title: 'تابلو آرزوها', desc: 'اینجا تابلوی آرزوهایت را می‌بینی و وقتی به آرزویی رسیدی، تیک می‌زنی.', c: 'var(--k4)', perm: 'wishes' },
+  { to: '/diary', icon: '📖', title: 'دفترچه‌ی من', desc: 'اینجا هر چه دلت خواست می‌نویسی. مامان می‌تواند آن را بخواند.', c: 'var(--k2)', perm: 'diary' },
+  { to: '/chat', icon: '💬', title: 'چت خانواده', desc: 'اینجا با مامان و بابا و برادر یا خواهرت پیام می‌دهی.', c: 'var(--k1)', perm: 'chat' },
+  { to: '/profile', icon: '🙂', title: 'عکس پروفایل', desc: 'اینجا عکس پروفایل خودت را عوض می‌کنی.', c: 'var(--k3)', perm: 'avatar' },
   { to: '/habits', icon: '🪥', title: 'عادت‌های من', desc: 'اینجا عادت‌های خوبت و داروهایت را تیک می‌زنی.', c: 'var(--k4)' },
   { to: '/requests', icon: '🛍️', title: 'درخواست خرید', desc: 'اینجا از مامان چیزهایی را که لازم داری می‌خواهی.', c: 'var(--k2)' },
   { to: '/suggest', icon: '💡', title: 'پیشنهاد من', desc: 'اینجا غذا یا تفریح مورد علاقه‌ات را پیشنهاد می‌دهی.', c: 'var(--k1)' },
   { to: '/gallery', icon: '🖼️', title: 'عکس‌های من', desc: 'اینجا عکس‌های خودت را می‌بینی.', c: 'var(--k3)' },
 ];
 export function Home() {
+  const { chat, inbox } = useUnread();
   const { me } = useAuth(); const go = useNavigate(); const photos = useLoad(() => api<any[]>('/photos')); const today = useLoad(() => api<any>('/child/today'));
-  const tiles = me!.age_group === 'young' ? TILES : TILES.filter((t) => t.to !== '/homework');
+  const showHw = me!.age_group === 'young' || !!(me!.settings as any)?.show_homework;
+  const tiles = (showHw ? TILES : TILES.filter((t) => t.to !== '/homework')).filter((t) => !t.perm || (me!.permissions[t.perm] ?? 0) >= 1);
   const [tested, setTested] = useState(false); const quote = useLoad(() => api<{ text: string | null }>('/quote/today')); const fact = useLoad(() => api<any>('/facts/today')); const occ = useLoad(() => api<any[]>('/occasions/upcoming?days=30'));
   useReadable([...(quote.data?.text ? [`جمله‌ی امروز: ${quote.data.text}`] : []), ...(fact.data?.today ? [`دانستنی امروز. ${fact.data.today.title}. ${fact.data.today.body}`] : []), ...tiles.map((t) => `${t.title}. ${t.desc}`)]);
   return <>
     {quote.data?.text && <div className="quote-card" role="note"><div className="text-sm opacity-80">✨ جمله‌ی امروز</div><p className="text-xl font-bold leading-9 mt-1">{quote.data.text}</p><button className="text-sm underline mt-1" onClick={() => speak(quote.data!.text!)}>🔊 بشنو</button></div>}
     {fact.data?.today && <button className="kid-card w-full text-start" onClick={() => { void speak(`${fact.data.today.title}. ${fact.data.today.body}`); go('/facts'); }}><div className="text-sm opacity-70">🧠 دانستنی امروز</div><b className="text-xl"><Mixed text={fact.data.today.title} /></b><p className="mt-1 line-clamp-2"><Mixed text={fact.data.today.body} /></p></button>}
+    {(me!.permissions.wishes ?? 0) >= 1 && <WishOfTheDay onOpen={() => go('/wishes')} />}
     {occ.data && occ.data.length > 0 && <div className="kid-card"><b className="text-lg">🎉 مناسبت‌های نزدیک</b>{occ.data.slice(0, 3).map((o) => <div key={o.id} className="flex items-center gap-2 py-1 text-lg"><span className="text-3xl">{o.icon}</span><span className="flex-1">{o.title}{o.age ? ` (${fa(o.age)} سالگی)` : ''}</span><span className="opacity-70 text-sm">{o.days_left === 0 ? 'امروز!' : o.days_left === 1 ? 'فردا' : `${fa(o.days_left)} روز دیگر`}</span></div>)}</div>}
     {photos.data && photos.data.length > 0 && <div className="flex gap-2 overflow-x-auto pb-1" aria-label="عکس‌های من">{photos.data.slice(0, 6).map((p) => <img key={p.id} src={photoUrl(p.id)} alt="" className="h-28 w-28 rounded-3xl object-cover flex-none shadow" />)}</div>}
     {today.data && <div className="kid-card flex items-center justify-between text-xl"><span>⭐ {fa(today.data.balance)} ستاره</span><span className="text-sm opacity-70">این هفته {fa(today.data.week_stars)} از {fa(today.data.settings.weekly_goal_stars)}</span></div>}
     <div className="grid grid-cols-2 gap-4">{tiles.map((t) => <div key={t.to} className="relative">
-      <button className="kid-tile w-full" style={{ background: t.c }} onClick={() => { void speak(`${t.title}. ${t.desc}`); go(t.to); }}><span className="text-6xl" aria-hidden>{t.icon}</span><span className="text-xl">{t.title}</span></button>
+      <button className="kid-tile w-full" style={{ background: t.c }} onClick={() => { void speak(`${t.title}. ${t.desc}`); go(t.to); }}><span className="text-6xl" aria-hidden>{t.icon}</span><span className="text-xl">{t.title}</span>{(t.to === '/chat' ? chat : t.to === '/messages' ? inbox : 0) > 0 && <span className="absolute top-2 end-2 rounded-full bg-red-500 text-white text-base px-2">{fa(t.to === '/chat' ? chat : inbox)}</span>}</button>
       <button aria-label={`بشنو: ${t.title}`} className="absolute top-2 start-2 w-11 h-11 rounded-full bg-white/90 text-xl shadow" onClick={() => speak(`${t.title}. ${t.desc}`)}>🔊</button></div>)}</div>
     <div className="kid-card space-y-2"><PushPanel big />
-      <button className="btn btn-ghost w-full" onClick={() => { setTested(true); void speak(`سلام ${me!.display_name} جان! اگر صدای من را می‌شنوی، همه چیز درست است.`); }}>🔈 آزمایش صدا</button>
-      {tested && ttsStatus() !== 'ok' && <p className="text-sm text-amber-700">اگر صدایی نشنیدی: این دستگاه شاید صدای فارسی نصب ندارد. به مامان بگو تا در تنظیمات گوشی («خروجی تبدیل متن به گفتار») فارسی را فعال کند.</p>}</div></>;
+      <details className="rounded-2xl bg-white/60 p-3"><summary className="cursor-pointer text-lg font-bold">🔊 تنظیم صدا</summary><div className="mt-3"><VoiceSettings kid /></div></details></div></>;
 }
 
 type Item = { id: string; title: string; kind: string; icon: string; description: string | null; start_time: string | null; end_time: string | null; stars: number; completion: string | null };
